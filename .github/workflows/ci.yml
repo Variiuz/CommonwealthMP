@@ -1,0 +1,42 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  server:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -B build/server -S . -A x64
+      - name: Build
+        run: cmake --build build/server --config Release
+      - name: Test
+        run: ctest --test-dir build/server -C Release --output-on-failure
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CommonwealthMP.Server
+          path: dist/server/CommonwealthMP.Server.exe
+
+  plugin:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: xmake-io/github-action-setup-xmake@v1
+        with:
+          xmake-version: latest
+      - name: Build plugin
+        working-directory: plugin
+        run: |
+          xmake f -m releasedbg -a x64 -y
+          xmake build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CommonwealthMP.dll
+          path: plugin/build/windows/x64/releasedbg/CommonwealthMP.dll

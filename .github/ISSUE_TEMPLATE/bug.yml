@@ -1,0 +1,45 @@
+name: Bug
+description: Something is broken
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - plugin
+        - server
+        - protocol
+        - packaging
+        - docs
+    validations:
+      required: true
+  - type: input
+    id: fo4
+    attributes:
+      label: Fallout4.exe FileVersion
+      placeholder: "1.11.240"
+    validations:
+      required: true
+  - type: input
+    id: f4se
+    attributes:
+      label: F4SE version
+      placeholder: "0.7.9"
+  - type: input
+    id: cmp
+    attributes:
+      label: Plugin / server version
+      placeholder: "0.5.7"
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+    validations:
+      required: true
+  - type: textarea
+    id: crash
+    attributes:
+      label: Crash files
+      description: Paths under Documents\My Games\Fallout4\F4SE\ (CommonwealthMP.crash.txt, CommonwealthMP.dmp). Paste a short excerpt if you can.

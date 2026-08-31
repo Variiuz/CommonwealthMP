@@ -1,0 +1,3 @@
+- [ ] Server and plugin stay on the same protocol (see `protocol/`)
+- [ ] Tests updated if the server or protocol changed
+- [ ] Docs updated if a command, INI key, or join flow changed

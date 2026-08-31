@@ -1,0 +1,54 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Configure server
+        run: cmake -B build/server -S . -A x64
+      - name: Build server
+        run: cmake --build build/server --config Release
+      - uses: xmake-io/github-action-setup-xmake@v1
+        with:
+          xmake-version: latest
+      - name: Build plugin
+        working-directory: plugin
+        run: |
+          xmake f -m releasedbg -a x64 -y
+          xmake build
+      - name: Stage artifacts
+        shell: pwsh
+        run: |
+          $ver = "${{ github.ref_name }}".TrimStart("v")
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          $srv = Join-Path $env:TEMP "cmp-server-$ver"
+          New-Item -ItemType Directory -Force -Path $srv | Out-Null
+          Copy-Item dist/server/CommonwealthMP.Server.exe $srv
+          Copy-Item server/server.ini.example $srv
+          Copy-Item README.md (Join-Path $srv "README.txt")
+          Compress-Archive -Path (Join-Path $srv "*") -DestinationPath "dist/CommonwealthMP.Server-$ver-win64.zip"
+          powershell -ExecutionPolicy Bypass -File scripts/pack-mo2.ps1
+          "VERSION=$ver" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $ver = $env:VERSION
+          $mo2 = Get-Item "dist/CommonwealthMP-$ver-mo2.zip"
+          gh release create "${{ github.ref_name }}" `
+            "dist/CommonwealthMP.Server-$ver-win64.zip" `
+            $mo2.FullName `
+            --title "CommonwealthMP $ver" `
+            --notes-file CHANGELOG.md

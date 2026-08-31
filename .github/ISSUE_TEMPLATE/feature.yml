@@ -1,0 +1,32 @@
+name: Feature
+description: Something we should add
+title: "[feat] "
+labels: ["enhancement"]
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - plugin
+        - server
+        - protocol
+        - packaging
+        - docs
+    validations:
+      required: true
+  - type: dropdown
+    id: protocol
+    attributes:
+      label: Does this bump the wire protocol?
+      options:
+        - "no"
+        - "yes"
+    validations:
+      required: true
+  - type: textarea
+    id: want
+    attributes:
+      label: What do you want
+    validations:
+      required: true
