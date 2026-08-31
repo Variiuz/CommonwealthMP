@@ -1,0 +1,13 @@
+# CommonwealthMP.Server settings.
+
+name=CommonwealthMP
+motd=
+port=7777
+fake=1
+max_players=8
+interest_uu=20000
+verbose=0
+quiet=0
+json_log=0
+# log_file=
+# session_dir=
