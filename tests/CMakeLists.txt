@@ -3,40 +3,64 @@ target_include_directories(CommonwealthMP.Units PRIVATE
 	${CMAKE_SOURCE_DIR}/protocol
 	${CMAKE_SOURCE_DIR}/server/src
 )
-target_compile_definitions(CommonwealthMP.Units PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
 
 add_executable(CommonwealthMP.ServerCases server/main.cpp)
-target_include_directories(CommonwealthMP.ServerCases PRIVATE ${CMAKE_SOURCE_DIR}/protocol)
-target_link_libraries(CommonwealthMP.ServerCases PRIVATE ws2_32)
-target_compile_definitions(CommonwealthMP.ServerCases PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+cmp_link_udp(CommonwealthMP.ServerCases)
 
 add_test(NAME cmp_units COMMAND CommonwealthMP.Units)
 
-add_test(
-	NAME cmp_hello_welcome
-	COMMAND powershell -NoProfile -ExecutionPolicy Bypass
-		-File ${CMAKE_SOURCE_DIR}/tools/probe/run_hello_test.ps1
-		-Server $<TARGET_FILE:CommonwealthMP.Server>
-		-Probe $<TARGET_FILE:CommonwealthMP.Probe>
-		-Port 17777
-)
+if(WIN32)
+	add_test(
+		NAME cmp_hello_welcome
+		COMMAND powershell -NoProfile -ExecutionPolicy Bypass
+			-File ${CMAKE_SOURCE_DIR}/tools/probe/run_hello_test.ps1
+			-Server $<TARGET_FILE:CommonwealthMP.Server>
+			-Probe $<TARGET_FILE:CommonwealthMP.Probe>
+			-Port 17777
+	)
+else()
+	add_test(
+		NAME cmp_hello_welcome
+		COMMAND bash ${CMAKE_SOURCE_DIR}/tools/probe/run_hello_test.sh
+			--server $<TARGET_FILE:CommonwealthMP.Server>
+			--probe $<TARGET_FILE:CommonwealthMP.Probe>
+			--port 17777
+	)
+endif()
 
 function(cmp_server_case name port)
 	cmake_parse_arguments(ARG "FAKE" "EXTRA" "" ${ARGN})
-	set(_args
-		-File ${CMAKE_SOURCE_DIR}/tests/run_server_case.ps1
-		-Server $<TARGET_FILE:CommonwealthMP.Server>
-		-Cases $<TARGET_FILE:CommonwealthMP.ServerCases>
-		-Case ${name}
-		-Port ${port}
-	)
-	if(NOT ARG_FAKE)
-		list(APPEND _args -NoFake)
+	if(WIN32)
+		set(_args
+			-File ${CMAKE_SOURCE_DIR}/tests/run_server_case.ps1
+			-Server $<TARGET_FILE:CommonwealthMP.Server>
+			-Cases $<TARGET_FILE:CommonwealthMP.ServerCases>
+			-Case ${name}
+			-Port ${port}
+		)
+		if(NOT ARG_FAKE)
+			list(APPEND _args -NoFake)
+		endif()
+		if(ARG_EXTRA)
+			list(APPEND _args -ExtraArgs "${ARG_EXTRA}")
+		endif()
+		add_test(NAME cmp_${name} COMMAND powershell -NoProfile -ExecutionPolicy Bypass ${_args})
+	else()
+		set(_args
+			${CMAKE_SOURCE_DIR}/tests/run_server_case.sh
+			--server $<TARGET_FILE:CommonwealthMP.Server>
+			--cases $<TARGET_FILE:CommonwealthMP.ServerCases>
+			--case ${name}
+			--port ${port}
+		)
+		if(NOT ARG_FAKE)
+			list(APPEND _args --no-fake)
+		endif()
+		if(ARG_EXTRA)
+			list(APPEND _args --extra-args "${ARG_EXTRA}")
+		endif()
+		add_test(NAME cmp_${name} COMMAND bash ${_args})
 	endif()
-	if(ARG_EXTRA)
-		list(APPEND _args -ExtraArgs "${ARG_EXTRA}")
-	endif()
-	add_test(NAME cmp_${name} COMMAND powershell -NoProfile -ExecutionPolicy Bypass ${_args})
 endfunction()
 
 cmp_server_case(reject_not_in_world 17778)
@@ -49,6 +73,14 @@ cmp_server_case(two_clients_relay 17782)
 cmp_server_case(persist_files 17783)
 cmp_server_case(host_handoff 17784)
 cmp_server_case(fake_off_at_two 17785 FAKE)
+cmp_server_case(fake_count 17803 FAKE EXTRA "--fake-count 3")
+cmp_server_case(actor_pose_host_only 17804)
+cmp_server_case(hit_relay 17805)
+cmp_server_case(pvp_off_blocks_hit 17806 EXTRA "--no-pvp")
+cmp_server_case(reject_password 17807 EXTRA "--password secret")
+cmp_server_case(reject_banned 17808 EXTRA "--ban banned-key")
+cmp_server_case(reject_mod_mismatch 17809)
+cmp_server_case(mod_match_ok 17810)
 cmp_server_case(junk_and_unknown 17786)
 cmp_server_case(query_empty 17788)
 cmp_server_case(query_with_host 17789)

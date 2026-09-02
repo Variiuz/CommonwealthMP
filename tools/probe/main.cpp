@@ -1,16 +1,11 @@
-#include <WinSock2.h>
-#include <WS2tcpip.h>
+#include "cmp_protocol.hpp"
+#include "cmp_udp.hpp"
 
 #include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <iostream>
 #include <string>
-#include <thread>
-
-#include "cmp_protocol.hpp"
-
-#pragma comment(lib, "ws2_32.lib")
 
 int main(int argc, char** argv)
 {
@@ -23,16 +18,15 @@ int main(int argc, char** argv)
 		port = static_cast<std::uint16_t>(std::stoi(argv[2]));
 	}
 
-	WSADATA wsa{};
-	if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
-		std::cerr << "WSAStartup failed\n";
+	if (!cmp::udp_startup()) {
+		std::cerr << "socket startup failed\n";
 		return 1;
 	}
 
-	SOCKET sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-	if (sock == INVALID_SOCKET) {
+	CmpSocket sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+	if (sock == kCmpInvalidSocket) {
 		std::cerr << "socket failed\n";
-		WSACleanup();
+		cmp::udp_cleanup();
 		return 1;
 	}
 
@@ -41,13 +35,12 @@ int main(int argc, char** argv)
 	dest.sin_port = htons(port);
 	if (inet_pton(AF_INET, host, &dest.sin_addr) != 1) {
 		std::cerr << "bad host " << host << "\n";
-		closesocket(sock);
-		WSACleanup();
+		cmp::udp_close(sock);
+		cmp::udp_cleanup();
 		return 2;
 	}
 
-	DWORD timeout = 2000;
-	setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
+	cmp::udp_set_recv_timeout_ms(sock, 2000);
 
 	const auto hello = cmp::make_hello(
 		"probe",
@@ -62,9 +55,9 @@ int main(int argc, char** argv)
 		cmp::kSanctuaryZ,
 		false);
 	if (sendto(sock, reinterpret_cast<const char*>(&hello), sizeof(hello), 0, reinterpret_cast<sockaddr*>(&dest), sizeof(dest)) < 0) {
-		std::cerr << "send Hello failed WSA " << WSAGetLastError() << "\n";
-		closesocket(sock);
-		WSACleanup();
+		std::cerr << "send Hello failed err " << cmp::udp_last_error() << "\n";
+		cmp::udp_close(sock);
+		cmp::udp_cleanup();
 		return 3;
 	}
 	std::cout << "Sent Hello v3 to " << host << ":" << port << " key=" << hello.playerKey << "\n";
@@ -78,7 +71,7 @@ int main(int argc, char** argv)
 	while (std::chrono::steady_clock::now() < deadline) {
 		char buf[512]{};
 		sockaddr_in from{};
-		int fromLen = sizeof(from);
+		CmpSockLen fromLen = sizeof(from);
 		const int n = recvfrom(sock, buf, sizeof(buf), 0, reinterpret_cast<sockaddr*>(&from), &fromLen);
 		if (n < static_cast<int>(sizeof(cmp::Header))) {
 			continue;
@@ -94,8 +87,8 @@ int main(int argc, char** argv)
 			std::memcpy(&reject, buf, sizeof(reject));
 			reject.message[95] = '\0';
 			std::cerr << "Reject " << reject.message << "\n";
-			closesocket(sock);
-			WSACleanup();
+			cmp::udp_close(sock);
+			cmp::udp_cleanup();
 			return 6;
 		}
 		if (type == cmp::Msg::Welcome && n >= static_cast<int>(sizeof(cmp::Welcome))) {
@@ -131,11 +124,11 @@ int main(int argc, char** argv)
 	const auto bye = cmp::make_bye(myId);
 	sendto(sock, reinterpret_cast<const char*>(&bye), sizeof(bye), 0, reinterpret_cast<sockaddr*>(&dest), sizeof(dest));
 
-	closesocket(sock);
-	WSACleanup();
+	cmp::udp_close(sock);
+	cmp::udp_cleanup();
 
 	if (!gotWelcome) {
-		std::cerr << "No Welcome (is CommonwealthMP.Server.exe running?)\n";
+		std::cerr << "No Welcome (is CommonwealthMP.Server running?)\n";
 		return 4;
 	}
 	if (fakeId != 0 && poses < 1) {

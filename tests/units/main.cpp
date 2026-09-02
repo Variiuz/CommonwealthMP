@@ -57,9 +57,10 @@ int test_protocol()
 	CHECK(hello.pluginVersion == cmp::kPluginVersion);
 	CHECK(hello.inWorld == 1);
 	CHECK(hello.flags == 0);
-	CHECK(sizeof(cmp::Hello) == 112);
-	CHECK(sizeof(cmp::SessionQuery) == 16);
-	CHECK(sizeof(cmp::SessionInfo) == 136);
+	CHECK(sizeof(cmp::Hello) == 135);
+	CHECK(sizeof(cmp::Welcome) == 26);
+	CHECK(sizeof(cmp::SessionQuery) == 20);
+	CHECK(sizeof(cmp::SessionInfo) == 142);
 
 	const auto helloReq = cmp::make_hello(
 		"g",
@@ -95,6 +96,9 @@ int test_protocol()
 	CHECK(std::string_view(cmp::reject_name(cmp::RejectReason::Full)) == "server full");
 	CHECK(std::string_view(cmp::reject_name(cmp::RejectReason::HostNotStreaming)) == "host not streaming");
 	CHECK(std::string_view(cmp::reject_name(cmp::RejectReason::PluginVersion)) == "plugin version");
+	CHECK(std::string_view(cmp::reject_name(cmp::RejectReason::Banned)) == "banned");
+	CHECK(std::string_view(cmp::reject_name(cmp::RejectReason::Password)) == "password");
+	CHECK(std::string_view(cmp::reject_name(cmp::RejectReason::ModMismatch)) == "mod mismatch");
 	CHECK(std::string_view(cmp::reject_name(cmp::RejectReason::None)) == "reject");
 	CHECK(cmp::msg_name(cmp::Msg::Hello) == "Hello");
 	CHECK(cmp::msg_name(cmp::Msg::Bye) == "Bye");
@@ -106,7 +110,7 @@ int test_protocol()
 	CHECK(helloIn.locationFormId == 0x1A26F);
 
 	const auto bye = cmp::make_bye(9);
-	CHECK(sizeof(cmp::Bye) == 12);
+	CHECK(sizeof(cmp::Bye) == 16);
 	CHECK(bye.peerId == 9);
 	CHECK(bye.header.size == sizeof(cmp::Bye));
 	CHECK(bye.header.type == static_cast<std::uint8_t>(cmp::Msg::Bye));
@@ -115,7 +119,7 @@ int test_protocol()
 		cmp::RejectReason::HostNotStreaming,
 		"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxMORE");
 	CHECK(std::strlen(longReject.message) == 95);
-	CHECK(sizeof(cmp::Reject) == 108);
+	CHECK(sizeof(cmp::Reject) == 112);
 
 	const auto longInfo = cmp::make_session_info(
 		1, 0x3C, 0, 0, 0, 0, false, true,
@@ -128,7 +132,7 @@ int test_protocol()
 
 	cmp::Header exact = hello.header;
 	exact.size = static_cast<std::uint16_t>(sizeof(cmp::Header));
-	CHECK(cmp::header_ok(exact, sizeof(cmp::Header)));
+	CHECK(!cmp::header_ok(exact, sizeof(cmp::Header)));
 	CHECK(cmp::header_ok(hello.header, hello.header.size));
 	CHECK(!cmp::header_ok(hello.header, hello.header.size - 1));
 	CHECK(std::strlen(hello.name) <= 31);
@@ -137,7 +141,73 @@ int test_protocol()
 	CHECK(std::string_view(hello.playerKey) == "verylong-player-key-that-should");
 	CHECK(cmp::header_ok(hello.header, sizeof(hello)));
 
-	CHECK(sizeof(cmp::PlayerPose) == 52);
+	CHECK(sizeof(cmp::PlayerPose) == 56);
+	CHECK(sizeof(cmp::ActorPose) == 64);
+	CHECK(sizeof(cmp::Hit) == 28);
+	CHECK(sizeof(cmp::Chat) == 96);
+	CHECK(sizeof(cmp::Kick) == 96);
+	CHECK(sizeof(cmp::Heartbeat) == 16);
+	CHECK(sizeof(cmp::Teleport) == 32);
+	CHECK(cmp::msg_name(cmp::Msg::Teleport) == "Teleport");
+	CHECK(cmp::kProtocolVersion == 11);
+	CHECK(cmp::kPluginVersion == 11);
+	CHECK(sizeof(cmp::Ack) == 20);
+	CHECK(sizeof(cmp::NackChunk) == 24);
+	CHECK(cmp::msg_name(cmp::Msg::Ack) == "Ack");
+	CHECK(cmp::msg_name(cmp::Msg::NackChunk) == "NackChunk");
+	CHECK(cmp::msg_is_reliable(cmp::Msg::Chat));
+	CHECK(!cmp::msg_is_reliable(cmp::Msg::PlayerPose));
+	CHECK(cmp::clamp_hit_damage(-3.0f) == 0.0f);
+	CHECK(cmp::clamp_hit_damage(0.0f) == 0.0f);
+	CHECK(cmp::clamp_hit_damage(40.0f) == 40.0f);
+	CHECK(cmp::clamp_hit_damage(9999.0f) == 500.0f);
+	CHECK(cmp::msg_name(cmp::Msg::Hit) == "Hit");
+	CHECK(cmp::msg_name(cmp::Msg::Chat) == "Chat");
+	CHECK(cmp::msg_name(cmp::Msg::Kick) == "Kick");
+	const auto infoFlags = cmp::make_session_info(1, 0x3C, 0, 0, 0, 1, true, false, "Srv", 8, "motd", cmp::kSessionPvpEnabled);
+	CHECK(infoFlags.sessionFlags == cmp::kSessionPvpEnabled);
+	const auto welcomeFlags = cmp::make_welcome(3, 0, true, true, cmp::kSessionPvpEnabled | cmp::kSessionPasswordRequired);
+	CHECK(welcomeFlags.sessionFlags == (cmp::kSessionPvpEnabled | cmp::kSessionPasswordRequired));
+	const auto helloPwd = cmp::make_hello("n", "k", true, 0x3C, 0, 10, 0, 1, 2, 3, false, 0, 0xABCD1234u, "secret");
+	CHECK(helloPwd.modHash == 0xABCD1234u);
+	CHECK(std::string_view(helloPwd.password) == "secret");
+	const auto hit = cmp::make_hit(1, 7, 40.5f);
+	CHECK(hit.header.type == static_cast<std::uint8_t>(cmp::Msg::Hit));
+	CHECK(hit.attackerPeerId == 1);
+	CHECK(hit.targetPeerId == 7);
+	CHECK(hit.damage == 40.5f);
+	CHECK(cmp::header_ok(hit.header, sizeof(hit)));
+	CHECK(cmp::has_pose_flag(cmp::PoseFlag::Dead, cmp::PoseFlag::Dead));
+	CHECK(cmp::is_fake_peer(cmp::kFakePeerId));
+	CHECK(cmp::is_fake_peer(6));
+	CHECK(!cmp::is_fake_peer(1));
+	CHECK(!cmp::is_fake_peer(7));
+	CHECK(cmp::clamp_fake_count(0) == 1);
+	CHECK(cmp::clamp_fake_count(3) == 3);
+	CHECK(cmp::clamp_fake_count(99) == cmp::kFakeCountMax);
+	CHECK(cmp::has_pose_flag(cmp::fake_anim_flags(0), cmp::PoseFlag::Drawn));
+	CHECK(cmp::has_pose_flag(cmp::fake_anim_flags(cmp::kFakeAnimStepTicks), cmp::PoseFlag::Sighted));
+	CHECK(cmp::has_pose_flag(cmp::fake_anim_flags(cmp::kFakeAnimStepTicks * 2), cmp::PoseFlag::Attacking));
+	CHECK(cmp::has_pose_flag(cmp::fake_anim_flags(cmp::kFakeAnimStepTicks * 3), cmp::PoseFlag::Reloading));
+	CHECK(cmp::has_pose_flag(cmp::fake_anim_flags(cmp::kFakeAnimStepTicks * 4), cmp::PoseFlag::Jumping));
+	CHECK(cmp::has_pose_flag(cmp::fake_anim_flags(cmp::kFakeAnimStepTicks * 5), cmp::PoseFlag::Sneak));
+	CHECK(cmp::has_pose_flag(cmp::fake_anim_flags(cmp::kFakeAnimStepTicks * 6), cmp::PoseFlag::Sprint));
+	CHECK(cmp::fake_anim_flags(cmp::kFakeAnimStepTicks * 7) == 0);
+	CHECK(cmp::fake_anim_holds_still(cmp::fake_anim_flags(0)));
+	CHECK(cmp::fake_anim_holds_still(cmp::fake_anim_flags(cmp::kFakeAnimStepTicks * 4)));
+	CHECK(!cmp::fake_anim_holds_still(cmp::fake_anim_flags(cmp::kFakeAnimStepTicks * 5)));
+	CHECK(!cmp::fake_anim_holds_still(0));
+	CHECK(std::string_view(cmp::fake_anim_name(cmp::PoseFlag::Drawn | cmp::PoseFlag::Attacking)) == "fire");
+	CHECK(std::string_view(cmp::fake_anim_name(0)) == "walk");
+	CHECK(cmp::msg_name(cmp::Msg::ActorPose) == "ActorPose");
+	const auto actorPose = cmp::make_actor_pose(0x1A4D7, 0x1A4D8, cmp::kCommonwealthWorldspace, 1, 2, 3, 0.5f, 0.1f, 40, 5, 6, cmp::PoseFlag::Drawn, true, false);
+	CHECK(actorPose.header.type == static_cast<std::uint8_t>(cmp::Msg::ActorPose));
+	CHECK(actorPose.refFormId == 0x1A4D7);
+	CHECK(actorPose.baseFormId == 0x1A4D8);
+	CHECK(actorPose.unique == 1);
+	CHECK(actorPose.dead == 0);
+	CHECK(cmp::has_pose_flag(actorPose.flags, cmp::PoseFlag::Drawn));
+	CHECK(cmp::header_ok(actorPose.header, sizeof(actorPose)));
 	const auto pose = cmp::make_pose(
 		3,
 		cmp::kCommonwealthWorldspace,
@@ -601,6 +671,7 @@ int test_config()
 	CHECK(cfg.maxPlayers == 8);
 	CHECK(cfg.port == cmp::kDefaultPort);
 	CHECK(cfg.fake);
+	CHECK(cfg.fakeCount == 1);
 	CHECK(nearly(cfg.interestUu, 20000.0f, 0.1f));
 
 	{
@@ -612,8 +683,12 @@ int test_config()
 			<< "max_players=0\n"
 			<< "interest_uu=-5\n"
 			<< "fake=off\n"
+			<< "fake_count=3\n"
 			<< "port=notanumber\n"
 			<< "verbose=yes\n"
+			<< "pvp=off\n"
+			<< "password=secret\n"
+			<< "mod_hash=0xABCD1234\n"
 			<< "noportvalue\n"
 			<< "\n";
 	}
@@ -624,7 +699,11 @@ int test_config()
 	CHECK(loaded.maxPlayers == 1);
 	CHECK(loaded.interestUu == 0.0f);
 	CHECK(!loaded.fake);
+	CHECK(loaded.fakeCount == 3);
 	CHECK(loaded.verbose);
+	CHECK(!loaded.pvp);
+	CHECK(loaded.password == "secret");
+	CHECK(loaded.modHash == 0xABCD1234u);
 	CHECK(loaded.port == cmp::kDefaultPort);
 
 	created = false;
@@ -649,6 +728,12 @@ int test_sim()
 	CHECK(cmp::in_interest(here, true, otherCell, true, 50.0f));
 	CHECK(cmp::in_interest(here, true, nearPose, true, 50.0f));
 	CHECK(!cmp::in_interest(here, true, farPose, true, 50.0f));
+
+	const auto actorNear = cmp::make_actor_pose(0x10, 0x11, cmp::kCommonwealthWorldspace, 20, 0, 0, 0);
+	const auto actorFar = cmp::make_actor_pose(0x10, 0x11, cmp::kCommonwealthWorldspace, 1000, 0, 0, 0);
+	CHECK(cmp::in_interest(actorNear, here, true, 50.0f));
+	CHECK(!cmp::in_interest(actorFar, here, true, 50.0f));
+	CHECK(cmp::in_interest(actorFar, otherCell, true, 50.0f));
 
 	std::unordered_map<std::string, cmp::RateBucket> buckets;
 	CHECK(cmp::allow_rate(buckets, "a", 1.0, 2));

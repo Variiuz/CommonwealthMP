@@ -14,8 +14,10 @@ if (Test-Path -LiteralPath $session) {
 }
 New-Item -ItemType Directory -Force -Path $session | Out-Null
 $log = Join-Path $session "server.log"
+$cfg = Join-Path $session "server.ini"
 
 $serverArgs = @(
+	"--config", $cfg,
 	"--port", "$Port",
 	"--reset-session",
 	"--session-dir", $session,

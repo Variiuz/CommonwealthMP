@@ -1,5 +1,6 @@
-#include <WinSock2.h>
-#include <WS2tcpip.h>
+#include "cmp_blobs.hpp"
+#include "cmp_protocol.hpp"
+#include "cmp_udp.hpp"
 
 #include <chrono>
 #include <cmath>
@@ -13,11 +14,6 @@
 #include <string_view>
 #include <thread>
 #include <vector>
-
-#include "cmp_blobs.hpp"
-#include "cmp_protocol.hpp"
-
-#pragma comment(lib, "ws2_32.lib")
 
 namespace fs = std::filesystem;
 
@@ -50,13 +46,13 @@ struct Options {
 };
 
 struct UdpClient {
-	SOCKET sock{ INVALID_SOCKET };
+	CmpSocket sock{ kCmpInvalidSocket };
 	sockaddr_in dest{};
 
 	bool open(const char* host, std::uint16_t port)
 	{
 		sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-		if (sock == INVALID_SOCKET) {
+		if (sock == kCmpInvalidSocket) {
 			return false;
 		}
 		sockaddr_in local{};
@@ -66,8 +62,7 @@ struct UdpClient {
 		if (bind(sock, reinterpret_cast<sockaddr*>(&local), sizeof(local)) != 0) {
 			return false;
 		}
-		DWORD timeout = 200;
-		setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
+		cmp::udp_set_recv_timeout_ms(sock, 200);
 		dest.sin_family = AF_INET;
 		dest.sin_port = htons(port);
 		return inet_pton(AF_INET, host, &dest.sin_addr) == 1;
@@ -75,9 +70,9 @@ struct UdpClient {
 
 	void close()
 	{
-		if (sock != INVALID_SOCKET) {
-			closesocket(sock);
-			sock = INVALID_SOCKET;
+		if (sock != kCmpInvalidSocket) {
+			cmp::udp_close(sock);
+			sock = kCmpInvalidSocket;
 		}
 	}
 
@@ -89,7 +84,7 @@ struct UdpClient {
 	int recv(char* buf, int cap)
 	{
 		sockaddr_in from{};
-		int fromLen = sizeof(from);
+		CmpSockLen fromLen = sizeof(from);
 		return recvfrom(sock, buf, cap, 0, reinterpret_cast<sockaddr*>(&from), &fromLen);
 	}
 };
@@ -104,6 +99,8 @@ struct Inbox {
 	cmp::SessionInfo session{};
 	bool haveSession{ false };
 	std::vector<cmp::PlayerPose> poses;
+	std::vector<cmp::ActorPose> actors;
+	std::vector<cmp::Hit> hits;
 	std::vector<cmp::Bye> byes;
 	cmp::BlobAssembly appearAsm;
 	cmp::BlobAssembly invAsm;
@@ -143,6 +140,14 @@ void pump(UdpClient& c, Inbox& in, int n)
 			cmp::PlayerPose pose{};
 			std::memcpy(&pose, buf, sizeof(pose));
 			in.poses.push_back(pose);
+		} else if (type == cmp::Msg::ActorPose && got >= static_cast<int>(sizeof(cmp::ActorPose))) {
+			cmp::ActorPose pose{};
+			std::memcpy(&pose, buf, sizeof(pose));
+			in.actors.push_back(pose);
+		} else if (type == cmp::Msg::Hit && got >= static_cast<int>(sizeof(cmp::Hit))) {
+			cmp::Hit hit{};
+			std::memcpy(&hit, buf, sizeof(hit));
+			in.hits.push_back(hit);
 		} else if (type == cmp::Msg::Bye && got >= static_cast<int>(sizeof(cmp::Bye))) {
 			cmp::Bye bye{};
 			std::memcpy(&bye, buf, sizeof(bye));
@@ -205,6 +210,16 @@ cmp::Hello hello_at(
 	float hour = 10.0f)
 {
 	return cmp::make_hello(name, key, true, loc, 0.0f, hour, 0, x, y, z, interior);
+}
+
+cmp::Hello hello_mod(const char* name, const char* key, std::uint32_t modHash, std::string_view password = {})
+{
+	auto h = hello_ok(name, key);
+	h.modHash = modHash;
+	if (!password.empty()) {
+		cmp::copy_cstr(h.password, sizeof(h.password), password);
+	}
+	return h;
 }
 
 bool send_chunks(UdpClient& c, cmp::Msg type, std::uint32_t peerId, const std::vector<std::uint8_t>& blob)
@@ -605,6 +620,282 @@ int case_fake_off_at_two(const Options& opt)
 	CHECK(sawBye);
 	a.close();
 	b.close();
+	return 0;
+}
+
+int case_fake_count(const Options& opt)
+{
+	UdpClient a;
+	CHECK(a.open(opt.host.c_str(), opt.port));
+	const auto ha = hello_ok("A", "fake-count-a");
+	CHECK(a.send(&ha, sizeof(ha)));
+	Inbox ia;
+	wait_for(a, ia, &Inbox::haveWelcome);
+	CHECK(ia.haveWelcome);
+	CHECK(ia.welcome.fakePeerId == cmp::kFakePeerId);
+
+	const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+	std::uint32_t seen = 0;
+	while (std::chrono::steady_clock::now() < deadline && seen != 0x7u) {
+		pump(a, ia, 16);
+		for (const auto& p : ia.poses) {
+			if (cmp::is_fake_peer(p.peerId)) {
+				seen |= 1u << (p.peerId - cmp::kFakePeerBegin);
+			}
+		}
+	}
+	CHECK((seen & 0x7u) == 0x7u);
+	bool sawDrawn = false;
+	for (const auto& p : ia.poses) {
+		if (p.peerId == cmp::kFakePeerId && cmp::has_pose_flag(p.flags, cmp::PoseFlag::Drawn)) {
+			sawDrawn = true;
+			break;
+		}
+	}
+	CHECK(sawDrawn);
+	a.close();
+	return 0;
+}
+
+int case_actor_pose_host_only(const Options& opt)
+{
+	UdpClient host;
+	UdpClient guest;
+	CHECK(host.open(opt.host.c_str(), opt.port));
+	CHECK(guest.open(opt.host.c_str(), opt.port));
+	const auto hh = hello_ok("Host", "actor-host");
+	CHECK(host.send(&hh, sizeof(hh)));
+	Inbox ih;
+	wait_for(host, ih, &Inbox::haveWelcome);
+	CHECK(ih.haveWelcome);
+	CHECK(ih.welcome.isHost == 1);
+
+	const auto hg = hello_ok("Guest", "actor-guest");
+	CHECK(guest.send(&hg, sizeof(hg)));
+	Inbox ig;
+	wait_for(guest, ig, &Inbox::haveWelcome);
+	CHECK(ig.haveWelcome);
+	CHECK(ig.welcome.isHost == 0);
+
+	const auto fromHost = cmp::make_actor_pose(
+		0x0001A4D7, 0x0001A4D8, cmp::kCommonwealthWorldspace,
+		cmp::kSanctuaryX, cmp::kSanctuaryY, cmp::kSanctuaryZ, 0.2f);
+	CHECK(host.send(&fromHost, sizeof(fromHost)));
+
+	bool guestSawHost = false;
+	const auto untilGuest = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+	while (std::chrono::steady_clock::now() < untilGuest && !guestSawHost) {
+		pump(guest, ig, 8);
+		for (const auto& p : ig.actors) {
+			if (p.refFormId == 0x0001A4D7) {
+				guestSawHost = true;
+			}
+		}
+	}
+	CHECK(guestSawHost);
+
+	ih.actors.clear();
+	const auto fromGuest = cmp::make_actor_pose(
+		0x0002BEEF, 0x0002BEEF, cmp::kCommonwealthWorldspace,
+		cmp::kSanctuaryX, cmp::kSanctuaryY, cmp::kSanctuaryZ, 0.2f);
+	CHECK(guest.send(&fromGuest, sizeof(fromGuest)));
+	std::this_thread::sleep_for(std::chrono::milliseconds(200));
+	pump(host, ih, 16);
+	bool hostSawGuest = false;
+	for (const auto& p : ih.actors) {
+		if (p.refFormId == 0x0002BEEF) {
+			hostSawGuest = true;
+		}
+	}
+	CHECK(!hostSawGuest);
+
+	host.close();
+	guest.close();
+	return 0;
+}
+
+int case_hit_relay(const Options& opt)
+{
+	UdpClient host;
+	UdpClient guest;
+	CHECK(host.open(opt.host.c_str(), opt.port));
+	CHECK(guest.open(opt.host.c_str(), opt.port));
+	const auto hh = hello_ok("Host", "hit-host");
+	CHECK(host.send(&hh, sizeof(hh)));
+	Inbox ih;
+	wait_for(host, ih, &Inbox::haveWelcome);
+	CHECK(ih.haveWelcome);
+	CHECK(ih.welcome.isHost == 1);
+
+	const auto hg = hello_ok("Guest", "hit-guest");
+	CHECK(guest.send(&hg, sizeof(hg)));
+	Inbox ig;
+	wait_for(guest, ig, &Inbox::haveWelcome);
+	CHECK(ig.haveWelcome);
+	CHECK(ig.welcome.isHost == 0);
+
+	const auto fromHost = cmp::make_hit(ih.welcome.peerId, ig.welcome.peerId, 40.0f);
+	CHECK(host.send(&fromHost, sizeof(fromHost)));
+
+	bool guestSaw = false;
+	const auto untilGuest = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+	while (std::chrono::steady_clock::now() < untilGuest && !guestSaw) {
+		pump(guest, ig, 8);
+		for (const auto& h : ig.hits) {
+			if (h.targetPeerId == ig.welcome.peerId && h.attackerPeerId == ih.welcome.peerId && h.damage == 40.0f) {
+				guestSaw = true;
+			}
+		}
+	}
+	CHECK(guestSaw);
+
+	ih.hits.clear();
+	const auto toFake = cmp::make_hit(ig.welcome.peerId, cmp::kFakePeerId, 40.0f);
+	CHECK(guest.send(&toFake, sizeof(toFake)));
+	std::this_thread::sleep_for(std::chrono::milliseconds(200));
+	pump(host, ih, 16);
+	bool hostSawFake = false;
+	for (const auto& h : ih.hits) {
+		if (h.targetPeerId == cmp::kFakePeerId) {
+			hostSawFake = true;
+		}
+	}
+	CHECK(!hostSawFake);
+
+	ig.hits.clear();
+	const auto spoof = cmp::make_hit(ih.welcome.peerId, ig.welcome.peerId, 99.0f);
+	CHECK(guest.send(&spoof, sizeof(spoof)));
+	std::this_thread::sleep_for(std::chrono::milliseconds(200));
+	pump(guest, ig, 16);
+	bool guestSawSpoof = false;
+	for (const auto& h : ig.hits) {
+		if (h.damage == 99.0f) {
+			guestSawSpoof = true;
+		}
+	}
+	CHECK(!guestSawSpoof);
+
+	host.close();
+	guest.close();
+	return 0;
+}
+
+int case_pvp_off_blocks_hit(const Options& opt)
+{
+	UdpClient host;
+	UdpClient guest;
+	CHECK(host.open(opt.host.c_str(), opt.port));
+	CHECK(guest.open(opt.host.c_str(), opt.port));
+	const auto hh = hello_ok("Host", "pvp-host");
+	CHECK(host.send(&hh, sizeof(hh)));
+	Inbox ih;
+	wait_for(host, ih, &Inbox::haveWelcome);
+
+	const auto hg = hello_ok("Guest", "pvp-guest");
+	CHECK(guest.send(&hg, sizeof(hg)));
+	Inbox ig;
+	wait_for(guest, ig, &Inbox::haveWelcome);
+
+	const auto fromHost = cmp::make_hit(ih.welcome.peerId, ig.welcome.peerId, 40.0f);
+	CHECK(host.send(&fromHost, sizeof(fromHost)));
+
+	bool guestSaw = false;
+	const auto untilGuest = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+	while (std::chrono::steady_clock::now() < untilGuest && !guestSaw) {
+		pump(guest, ig, 8);
+		for (const auto& h : ig.hits) {
+			if (h.targetPeerId == ig.welcome.peerId) {
+				guestSaw = true;
+			}
+		}
+	}
+	CHECK(!guestSaw);
+
+	host.close();
+	guest.close();
+	return 0;
+}
+
+int case_reject_password(const Options& opt)
+{
+	UdpClient bad;
+	CHECK(bad.open(opt.host.c_str(), opt.port));
+	auto hello = hello_ok("Guest", "pwd-guest");
+	CHECK(bad.send(&hello, sizeof(hello)));
+	Inbox inBad;
+	wait_for(bad, inBad, &Inbox::haveReject);
+	CHECK(inBad.haveReject);
+	CHECK(inBad.reject.reason == static_cast<std::uint32_t>(cmp::RejectReason::Password));
+
+	UdpClient good;
+	CHECK(good.open(opt.host.c_str(), opt.port));
+	auto helloGood = hello_mod("Guest", "pwd-guest2", 0, "secret");
+	CHECK(good.send(&helloGood, sizeof(helloGood)));
+	Inbox inGood;
+	wait_for(good, inGood, &Inbox::haveWelcome);
+	CHECK(inGood.haveWelcome);
+
+	bad.close();
+	good.close();
+	return 0;
+}
+
+int case_reject_banned(const Options& opt)
+{
+	UdpClient c;
+	CHECK(c.open(opt.host.c_str(), opt.port));
+	const auto hello = hello_ok("Banned", "banned-key");
+	CHECK(c.send(&hello, sizeof(hello)));
+	Inbox in;
+	wait_for(c, in, &Inbox::haveReject);
+	CHECK(in.haveReject);
+	CHECK(in.reject.reason == static_cast<std::uint32_t>(cmp::RejectReason::Banned));
+	c.close();
+	return 0;
+}
+
+int case_reject_mod_mismatch(const Options& opt)
+{
+	UdpClient host;
+	UdpClient guest;
+	CHECK(host.open(opt.host.c_str(), opt.port));
+	CHECK(guest.open(opt.host.c_str(), opt.port));
+	const auto hh = hello_mod("Host", "mod-host", 0xAAAAAAAAu);
+	CHECK(host.send(&hh, sizeof(hh)));
+	Inbox ih;
+	wait_for(host, ih, &Inbox::haveWelcome);
+
+	const auto hg = hello_mod("Guest", "mod-guest", 0xBBBBBBBBu);
+	CHECK(guest.send(&hg, sizeof(hg)));
+	Inbox ig;
+	wait_for(guest, ig, &Inbox::haveReject);
+	CHECK(ig.haveReject);
+	CHECK(ig.reject.reason == static_cast<std::uint32_t>(cmp::RejectReason::ModMismatch));
+
+	host.close();
+	guest.close();
+	return 0;
+}
+
+int case_mod_match_ok(const Options& opt)
+{
+	UdpClient host;
+	UdpClient guest;
+	CHECK(host.open(opt.host.c_str(), opt.port));
+	CHECK(guest.open(opt.host.c_str(), opt.port));
+	const auto hh = hello_mod("Host", "modok-host", 0x12345678u);
+	CHECK(host.send(&hh, sizeof(hh)));
+	Inbox ih;
+	wait_for(host, ih, &Inbox::haveWelcome);
+
+	const auto hg = hello_mod("Guest", "modok-guest", 0x12345678u);
+	CHECK(guest.send(&hg, sizeof(hg)));
+	Inbox ig;
+	wait_for(guest, ig, &Inbox::haveWelcome);
+	CHECK(ig.haveWelcome);
+
+	host.close();
+	guest.close();
 	return 0;
 }
 
@@ -1010,7 +1301,8 @@ int case_same_key_two_sockets(const Options& opt)
 	Inbox ib;
 	wait_for(b, ib, &Inbox::haveWelcome);
 	CHECK(ib.haveWelcome);
-	CHECK(ia.welcome.peerId != ib.welcome.peerId);
+	// Soft reconnect reuses peerId when the same playerKey moves to a new socket.
+	CHECK(ia.welcome.peerId == ib.welcome.peerId);
 	a.close();
 	b.close();
 	return 0;
@@ -1044,9 +1336,8 @@ int main(int argc, char** argv)
 		return 2;
 	}
 
-	WSADATA wsa{};
-	if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
-		std::cerr << "WSAStartup failed\n";
+	if (!cmp::udp_startup()) {
+		std::cerr << "socket startup failed\n";
 		return 1;
 	}
 
@@ -1070,6 +1361,22 @@ int main(int argc, char** argv)
 		case_host_handoff(opt);
 	} else if (opt.which == "fake_off_at_two") {
 		case_fake_off_at_two(opt);
+	} else if (opt.which == "fake_count") {
+		case_fake_count(opt);
+	} else if (opt.which == "actor_pose_host_only") {
+		case_actor_pose_host_only(opt);
+	} else if (opt.which == "hit_relay") {
+		case_hit_relay(opt);
+	} else if (opt.which == "pvp_off_blocks_hit") {
+		case_pvp_off_blocks_hit(opt);
+	} else if (opt.which == "reject_password") {
+		case_reject_password(opt);
+	} else if (opt.which == "reject_banned") {
+		case_reject_banned(opt);
+	} else if (opt.which == "reject_mod_mismatch") {
+		case_reject_mod_mismatch(opt);
+	} else if (opt.which == "mod_match_ok") {
+		case_mod_match_ok(opt);
 	} else if (opt.which == "junk_and_unknown") {
 		case_junk_and_unknown(opt);
 	} else if (opt.which == "query_empty") {
@@ -1102,11 +1409,11 @@ int main(int argc, char** argv)
 		case_same_key_two_sockets(opt);
 	} else {
 		std::cerr << "unknown case " << opt.which << "\n";
-		WSACleanup();
+		cmp::udp_cleanup();
 		return 2;
 	}
 
-	WSACleanup();
+	cmp::udp_cleanup();
 	if (g_fails) {
 		std::cerr << "case " << opt.which << ": " << g_fails << " failed / " << g_checks << " checks\n";
 		return 1;
