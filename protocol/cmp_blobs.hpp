@@ -3,6 +3,7 @@
 #include "cmp_protocol.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <span>
@@ -227,6 +228,7 @@ struct BlobAssembly {
 	std::uint16_t chunkCount{ 0 };
 	std::uint16_t blobBytes{ 0 };
 	std::vector<std::vector<std::uint8_t>> chunks;
+	double startedSec{ 0.0 };
 };
 
 inline bool split_blob_chunks(
@@ -281,6 +283,11 @@ inline AssembleStatus assemble_blob_chunk(
 		a.chunkCount = chunk.chunkCount;
 		a.blobBytes = chunk.blobBytes;
 		a.chunks.assign(chunk.chunkCount, {});
+		a.startedSec = 0.0;
+	}
+	if (a.startedSec <= 0.0) {
+		using clock = std::chrono::steady_clock;
+		a.startedSec = std::chrono::duration<double>(clock::now().time_since_epoch()).count();
 	}
 	a.chunks[chunk.chunkIndex] = std::vector<std::uint8_t>(
 		datagram.data() + sizeof(chunk),
