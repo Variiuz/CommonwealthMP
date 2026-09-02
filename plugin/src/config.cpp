@@ -1,5 +1,7 @@
 #include "pch.h"
-#include "cmp.h"
+#include "session.h"
+#include "config.h"
+#include "steam_api.h"
 #include "cmp_util.hpp"
 
 #include <algorithm>
@@ -108,8 +110,19 @@ void CMP_LoadSettings()
 			: 0x0001D323u;
 	}
 	s.settings.poseHz = std::max(1, static_cast<int>(REX::W32::GetPrivateProfileIntA("Debug", "PoseHz", 20, ini.c_str())));
+	s.settings.interpDelayMs = static_cast<int>(REX::W32::GetPrivateProfileIntA("Network", "InterpDelayMs", -1, ini.c_str()));
+	s.settings.reliableRetries = std::max(1, static_cast<int>(REX::W32::GetPrivateProfileIntA("Network", "ReliableRetries", 8, ini.c_str())));
+	s.settings.blobAssembleTtlMs = std::max(500, static_cast<int>(REX::W32::GetPrivateProfileIntA("Network", "BlobAssembleTtlMs", 5000, ini.c_str())));
 	s.settings.pointerHud = REX::W32::GetPrivateProfileIntA("Debug", "PointerHud", 1, ini.c_str()) != 0;
 	s.settings.pointerSeconds = std::max(1, static_cast<int>(REX::W32::GetPrivateProfileIntA("Debug", "PointerSeconds", 4, ini.c_str())));
+	s.settings.overlayVisible = REX::W32::GetPrivateProfileIntA("UI", "OverlayVisible", 0, ini.c_str()) != 0;
+	s.settings.overlayChatOpen = REX::W32::GetPrivateProfileIntA("UI", "ChatOpen", 1, ini.c_str()) != 0;
+	s.settings.overlayDebugOpen = REX::W32::GetPrivateProfileIntA("UI", "DebugOpen", 1, ini.c_str()) != 0;
+	s.settings.overlayToggleKey = static_cast<std::uint32_t>(REX::W32::GetPrivateProfileIntA("UI", "ToggleKey", 0x2D, ini.c_str()));
+	s.settings.overlayFontScale = static_cast<float>(REX::W32::GetPrivateProfileIntA("UI", "FontScale", 100, ini.c_str())) / 100.0f;
+	s.settings.overlayFontScale = std::max(0.25f, std::min(4.0f, s.settings.overlayFontScale));
+	s.settings.presenceDiscord = REX::W32::GetPrivateProfileIntA("Presence", "Discord", 1, ini.c_str()) != 0;
+	s.settings.presenceSteam = REX::W32::GetPrivateProfileIntA("Presence", "Steam", 0, ini.c_str()) != 0;
 	const auto iniName = IniStr("Session", "PlayerName", "", ini);
 	const char* nameSrc = "ini";
 	if (!iniName.empty()) {
@@ -120,15 +133,24 @@ void CMP_LoadSettings()
 			s.settings.playerName = std::move(steam);
 			nameSrc = "steam";
 		} else {
-			s.settings.playerName = "fo4";
+			s.settings.playerName = "Player";
 			nameSrc = "fallback";
 		}
 	}
 	s.settings.playerKey = LoadOrCreatePlayerKey(ini);
+	s.settings.password = IniStr("Network", "Password", "", ini);
+	s.settings.serverExe = IniStr("Network", "ServerExe", "", ini);
+	if (s.settings.password.size() > 15) {
+		s.settings.password.resize(15);
+	}
 	REX::INFO("INI {} Host={}:{} AutoJoin={} ghost={} spawn={} source={:08X} playerKey={} name={} nameSrc={} pointerHud={}",
 		ini, s.settings.host, s.settings.port, s.settings.autoJoin, s.settings.ghostEditorId,
 		s.settings.ghostSpawn, s.settings.ghostSourceForm, s.settings.playerKey, s.settings.playerName, nameSrc,
 		s.settings.pointerHud);
+	REX::INFO("INI UI overlayVisible={} chatOpen={} debugOpen={} toggleKey={:02X} fontScale={}",
+		s.settings.overlayVisible, s.settings.overlayChatOpen, s.settings.overlayDebugOpen,
+		s.settings.overlayToggleKey, s.settings.overlayFontScale);
+	REX::INFO("INI Presence discord={} steam={}", s.settings.presenceDiscord, s.settings.presenceSteam);
 }
 
 void CMP_SaveNetworkSettings(const std::string& host, std::uint16_t port)
@@ -147,4 +169,61 @@ void CMP_SaveNetworkSettings(const std::string& host, std::uint16_t port)
 		REX::WARN("WritePrivateProfileStringA missing; Host/Port kept in memory only");
 	}
 	REX::INFO("saved Network Host={}:{} -> {}", s.settings.host, s.settings.port, ini);
+}
+
+void CMP_SavePlayerName(const std::string& name)
+{
+	auto& s = CMP_Session();
+	std::string trimmed = name;
+	while (!trimmed.empty() && (trimmed.front() == ' ' || trimmed.front() == '\t')) {
+		trimmed.erase(trimmed.begin());
+	}
+	while (!trimmed.empty() && (trimmed.back() == ' ' || trimmed.back() == '\t')) {
+		trimmed.pop_back();
+	}
+	if (trimmed.size() > 31) {
+		trimmed.resize(31);
+	}
+
+	const auto ini = IniPath();
+	using WriteFn = std::int32_t(__stdcall*)(const char*, const char*, const char*, const char*);
+	static const auto writeIni = reinterpret_cast<WriteFn>(
+		REX::W32::GetProcAddress(REX::W32::GetModuleHandleA("kernel32.dll"), "WritePrivateProfileStringA"));
+	if (writeIni) {
+		writeIni("Session", "PlayerName", trimmed.c_str(), ini.c_str());
+	}
+
+	if (trimmed.empty()) {
+		auto steam = CMP_SteamPersonaName();
+		s.settings.playerName = steam.empty() ? "fo4" : std::move(steam);
+		REX::INFO("saved PlayerName empty (using {})", s.settings.playerName);
+		return;
+	}
+	s.settings.playerName = std::move(trimmed);
+	REX::INFO("saved PlayerName {}", s.settings.playerName);
+}
+
+void CMP_SavePassword(const std::string& password)
+{
+	auto& s = CMP_Session();
+	std::string trimmed = password;
+	while (!trimmed.empty() && (trimmed.front() == ' ' || trimmed.front() == '\t')) {
+		trimmed.erase(trimmed.begin());
+	}
+	while (!trimmed.empty() && (trimmed.back() == ' ' || trimmed.back() == '\t')) {
+		trimmed.pop_back();
+	}
+	if (trimmed.size() > 15) {
+		trimmed.resize(15);
+	}
+	s.settings.password = trimmed;
+
+	const auto ini = IniPath();
+	using WriteFn = std::int32_t(__stdcall*)(const char*, const char*, const char*, const char*);
+	static const auto writeIni = reinterpret_cast<WriteFn>(
+		REX::W32::GetProcAddress(REX::W32::GetModuleHandleA("kernel32.dll"), "WritePrivateProfileStringA"));
+	if (writeIni) {
+		writeIni("Network", "Password", s.settings.password.c_str(), ini.c_str());
+	}
+	REX::INFO("saved Network Password ({} chars)", s.settings.password.size());
 }

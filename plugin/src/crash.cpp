@@ -1,5 +1,5 @@
 #include "pch.h"
-#include "cmp.h"
+#include "crash.h"
 
 #include "REX/W32/OLE32.h"
 #include "REX/W32/SHELL32.h"
@@ -42,6 +42,8 @@ struct SehPack {
 	unsigned code;
 	std::uintptr_t ip;
 };
+
+thread_local int g_sehDepth{ 0 };
 
 const char* CodeName(unsigned code)
 {
@@ -348,8 +350,67 @@ void WhyText(char* dst, std::size_t cap, EXCEPTION_POINTERS* ep)
 	}
 }
 
+bool LaunchGuiReporter(const char* origin)
+{
+	wchar_t exePath[MAX_PATH]{};
+	if (!GetModuleFileNameW(reinterpret_cast<HMODULE>(REX::W32::GetCurrentModule()), exePath, MAX_PATH)) {
+		return false;
+	}
+	auto* slash = std::wcsrchr(exePath, L'\\');
+	if (!slash) {
+		return false;
+	}
+	*(slash + 1) = 0;
+	WcsCat(exePath, MAX_PATH, L"cmp-reporter.exe");
+	if (GetFileAttributesW(exePath) == INVALID_FILE_ATTRIBUTES) {
+		return false;
+	}
+
+	wchar_t originWide[64]{};
+	if (origin && origin[0]) {
+		MultiByteToWideChar(CP_UTF8, 0, origin, -1, originWide, 64);
+	} else {
+		WcsCopy(originWide, 64, L"unknown");
+	}
+
+	wchar_t cmd[MAX_PATH * 6]{};
+	std::swprintf(
+		cmd,
+		MAX_PATH * 6,
+		L"\"%s\" --crash-txt \"%s\" --crash-dmp \"%s\" --origin %s",
+		exePath,
+		g_logPath,
+		g_dmpPath,
+		originWide);
+
+	STARTUPINFOW si{};
+	si.cb = sizeof(si);
+	PROCESS_INFORMATION pi{};
+	const BOOL ok = CreateProcessW(
+		nullptr,
+		cmd,
+		nullptr,
+		nullptr,
+		FALSE,
+		CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS,
+		nullptr,
+		nullptr,
+		&si,
+		&pi);
+	if (!ok) {
+		return false;
+	}
+	CloseHandle(pi.hThread);
+	CloseHandle(pi.hProcess);
+	return true;
+}
+
 void ShowReporter(EXCEPTION_POINTERS* ep, const char* origin)
 {
+	if (LaunchGuiReporter(origin)) {
+		return;
+	}
+
 	char why[320]{};
 	WhyText(why, sizeof(why), ep);
 	char where[MAX_PATH + 32]{};
@@ -368,7 +429,7 @@ void ShowReporter(EXCEPTION_POINTERS* ep, const char* origin)
 	std::snprintf(
 		body,
 		sizeof(body),
-		"CommonwealthMP stopped Fallout 4.\n"
+		"CommonwealthMP stopped Fallout 4. (or atleast i hope I was the reason!)\n"
 		"\n"
 		"Why:\n%s\n"
 		"\n"
@@ -378,7 +439,7 @@ void ShowReporter(EXCEPTION_POINTERS* ep, const char* origin)
 		"\n"
 		"Full log:\n%s\n"
 		"\n"
-		"Copy that crash.txt into data/dumps if you want the agent to read it.",
+		"cmp-reporter.exe was not found next to the plugin. Install it or attach the log above.\n",
 		why,
 		where[0] ? where : "-",
 		LastNote(),
@@ -554,6 +615,10 @@ LONG WINAPI Veh(EXCEPTION_POINTERS* ep)
 	if (!ep || !ep->ExceptionRecord || !IsFatal(ep->ExceptionRecord->ExceptionCode)) {
 		return EXCEPTION_CONTINUE_SEARCH;
 	}
+		// SEH probes (e.g. steam_rich_probe) fault on purpose; let __try/__except handle them.
+	if (g_sehDepth > 0) {
+		return EXCEPTION_CONTINUE_SEARCH;
+	}
 	WriteCrash(ep, "veh");
 	return EXCEPTION_CONTINUE_SEARCH;
 }
@@ -602,10 +667,12 @@ int SehFilter(EXCEPTION_POINTERS* ep, SehPack* pack)
 
 void SehRun(SehPack* pack)
 {
+	++g_sehDepth;
 	__try {
 		pack->fn(pack->ctx);
 	} __except (SehFilter(GetExceptionInformation(), pack)) {
 	}
+	
 }
 
 }  // namespace

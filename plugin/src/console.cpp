@@ -1,5 +1,14 @@
 #include "pch.h"
-#include "cmp.h"
+#include "session.h"
+#include "console.h"
+#include "net.h"
+#include "ghost.h"
+#include "dump.h"
+#include "indicators.h"
+#include "modhash.h"
+#include "pointer.h"
+#include "presence.h"
+#include "steam_api.h"
 
 namespace {
 
@@ -121,6 +130,31 @@ bool ExecDump(
 		PrintLine(std::string("cmp_dump: ") + path);
 		PrintLine("copy that file to the repo as data/dumps/live.txt");
 	}
+	result = 0.f;
+	return true;
+}
+
+RE::SCRIPT_PARAMETER g_animParams[1]{
+	{ "Step", RE::SCRIPT_PARAM_TYPE::kInt, true }
+};
+
+bool ExecAnim(
+	const RE::SCRIPT_PARAMETER* params,
+	const char* compiled,
+	RE::TESObjectREFR* ref,
+	RE::TESObjectREFR* container,
+	RE::Script* script,
+	RE::ScriptLocals* locals,
+	float& result,
+	std::uint32_t& offset)
+{
+	std::int32_t step = 0;
+	if (params && compiled) {
+		RE::Script::ParseParameters(params, compiled, offset, ref, container, script, locals, &step);
+	}
+	std::string note;
+	CMP_ForceAnim(step, note);
+	PrintLine(note);
 	result = 0.f;
 	return true;
 }
@@ -282,6 +316,137 @@ void CMP_ProbeForms()
 	}
 }
 
+RE::SCRIPT_PARAMETER g_peerParams[1]{
+	{ "PeerId", RE::SCRIPT_PARAM_TYPE::kInt, true }
+};
+
+bool ExecKick(
+	const RE::SCRIPT_PARAMETER* params,
+	const char* compiled,
+	RE::TESObjectREFR* ref,
+	RE::TESObjectREFR* container,
+	RE::Script* script,
+	RE::ScriptLocals* locals,
+	float& result,
+	std::uint32_t& offset)
+{
+	std::int32_t peer = 0;
+	if (params && compiled) {
+		RE::Script::ParseParameters(params, compiled, offset, ref, container, script, locals, &peer);
+	}
+	auto& s = CMP_Session();
+	if (!s.net.joined || s.net.myPeerId == 0 || peer <= 0) {
+		PrintLine("cmp_kick: not joined or invalid peer");
+		result = 0.f;
+		return true;
+	}
+	if (!s.net.isHost) {
+		PrintLine("cmp_kick: only host can kick");
+		result = 0.f;
+		return true;
+	}
+	CMP_SendKick(static_cast<std::uint32_t>(peer), "kicked by host");
+	PrintLine("cmp_kick: peer " + std::to_string(peer));
+	result = 0.f;
+	return true;
+}
+
+bool ExecTeleport(
+	const RE::SCRIPT_PARAMETER* params,
+	const char* compiled,
+	RE::TESObjectREFR* ref,
+	RE::TESObjectREFR* container,
+	RE::Script* script,
+	RE::ScriptLocals* locals,
+	float& result,
+	std::uint32_t& offset)
+{
+	std::int32_t peer = 0;
+	if (params && compiled) {
+		RE::Script::ParseParameters(params, compiled, offset, ref, container, script, locals, &peer);
+	}
+	auto& s = CMP_Session();
+	if (!s.net.joined || s.net.myPeerId == 0 || peer <= 0) {
+		PrintLine("cmp_teleport: not joined or invalid peer");
+		result = 0.f;
+		return true;
+	}
+	if (!s.net.isHost) {
+		PrintLine("cmp_teleport: only host can teleport");
+		result = 0.f;
+		return true;
+	}
+	CMP_SendTeleport(static_cast<std::uint32_t>(peer));
+	PrintLine("cmp_teleport: peer " + std::to_string(peer) + " to host");
+	result = 0.f;
+	return true;
+}
+
+bool ExecModHash(
+	const RE::SCRIPT_PARAMETER*,
+	const char*,
+	RE::TESObjectREFR*,
+	RE::TESObjectREFR*,
+	RE::Script*,
+	RE::ScriptLocals*,
+	float& result,
+	std::uint32_t&)
+{
+	const auto hash = CMP_ComputeModHash();
+	char buf[32]{};
+	std::snprintf(buf, sizeof(buf), "cmp_modhash: 0x%08X", hash);
+	PrintLine(buf);
+	result = 0.f;
+	return true;
+}
+
+bool ExecPresence(
+	const RE::SCRIPT_PARAMETER*,
+	const char*,
+	RE::TESObjectREFR*,
+	RE::TESObjectREFR*,
+	RE::Script*,
+	RE::ScriptLocals*,
+	float& result,
+	std::uint32_t&)
+{
+	CMP_Presence_ReinitDiscord();
+	PrintLine(CMP_PresenceStatusText());
+	result = 0.f;
+	return true;
+}
+
+bool ExecSteam(
+	const RE::SCRIPT_PARAMETER*,
+	const char*,
+	RE::TESObjectREFR*,
+	RE::TESObjectREFR*,
+	RE::Script*,
+	RE::ScriptLocals*,
+	float& result,
+	std::uint32_t&)
+{
+	const auto probe = CMP_ProbeSteamApi();
+	PrintLine(CMP_FormatSteamProbe(probe));
+	result = 0.f;
+	return true;
+}
+
+bool ExecIndicators(
+	const RE::SCRIPT_PARAMETER*,
+	const char*,
+	RE::TESObjectREFR*,
+	RE::TESObjectREFR*,
+	RE::Script*,
+	RE::ScriptLocals*,
+	float& result,
+	std::uint32_t&)
+{
+	PrintLine(CMP_IndicatorsDebugText());
+	result = 0.f;
+	return true;
+}
+
 void CMP_RegisterConsole()
 {
 	Steal("DumpTexturePalette", "cmp_join", "CommonwealthMP: join A.B.C.D Port (default 127.0.0.1:7777)", ExecJoin, g_joinParams, 5);
@@ -292,4 +457,11 @@ void CMP_RegisterConsole()
 	Steal("DumpPapyrusStacks", "cmp_probeforms", "CommonwealthMP: dump live TESForm types for ghost spawn", ExecProbe);
 	Steal("ToggleCollisionGeometry", "cmp_dump", "CommonwealthMP: write FormID/RVA/idle/cell dump for development", ExecDump);
 	Steal("ToggleActorMover", "cmp_query", "CommonwealthMP: query if a live Commonwealth host is on A.B.C.D Port", ExecQuery, g_joinParams, 5);
+	Steal("ToggleStairsGeometry", "cmp_anim", "CommonwealthMP: force dummy (or you) pose 0=draw 1=ads 2=fire 3=reload 4=jump 5=sneak 6=sprint 7=walk", ExecAnim, g_animParams, 1);
+	Steal("TestLocalMap", "cmp_kick", "CommonwealthMP: host kick PEER", ExecKick, g_peerParams, 1);
+	Steal("TestUFOCam", "cmp_teleport", "CommonwealthMP: host teleport PEER to you", ExecTeleport, g_peerParams, 1);
+	Steal("ToggleTrees", "cmp_modhash", "CommonwealthMP: print loaded-mod fingerprint for join checks", ExecModHash);
+	Steal("ToggleBorders", "cmp_presence", "CommonwealthMP: print Discord/Steam rich presence status (reconnects Discord)", ExecPresence);
+	Steal("ToggleSky", "cmp_steam", "CommonwealthMP: probe Steam API and Rich Presence", ExecSteam);
+	Steal("ToggleWireframe", "cmp_indicators", "CommonwealthMP: print HUD compass and map indicator debug state", ExecIndicators);
 }

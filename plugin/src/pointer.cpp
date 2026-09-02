@@ -1,5 +1,8 @@
 #include "pch.h"
-#include "cmp.h"
+#include "session.h"
+#include "pointer.h"
+#include "ghost.h"
+#include "net.h"
 
 #include <chrono>
 #include <cmath>
@@ -68,17 +71,22 @@ bool CopyNearest(RemoteSnapshot& out)
 {
 	auto& s = CMP_Session();
 	std::lock_guard lock(s.mutex);
-	out.joined = s.joined;
-	out.myPeer = s.myPeerId;
+	out.joined = s.net.joined;
+	out.myPeer = s.net.myPeerId;
 	out.ghostNote = s.lastGhostNote;
 	out.youLoc = PlayerLocationForm();
 
 	const cmp::PlayerPose* best = nullptr;
-	for (const auto& [peer, pose] : s.latestPose) {
-		if (peer == s.myPeerId) {
+	for (const auto& [peer, pose] : s.net.latestPose) {
+		if (peer == s.net.myPeerId) {
 			continue;
 		}
-		if (s.fakePeerId != 0 && peer == s.fakePeerId) {
+			if (s.net.fakePeerId != 0 && peer == s.net.fakePeerId) {
+			best = &pose;
+			out.peer = peer;
+			break;
+		}
+		if (cmp::is_fake_peer(peer)) {
 			best = &pose;
 			out.peer = peer;
 			break;
@@ -92,9 +100,9 @@ bool CopyNearest(RemoteSnapshot& out)
 		return false;
 	}
 	out.pose = *best;
-	auto git = s.ghosts.find(out.peer);
-	out.hasGhost = git != s.ghosts.end() && static_cast<bool>(git->second);
-	if (auto nit = s.ghostNames.find(out.peer); nit != s.ghostNames.end()) {
+	auto git = s.ghosts.byPeer.find(out.peer);
+	out.hasGhost = git != s.ghosts.byPeer.end() && static_cast<bool>(git->second);
+	if (auto nit = s.ghosts.names.find(out.peer); nit != s.ghosts.names.end()) {
 		out.name = nit->second;
 	}
 	return true;
@@ -164,21 +172,7 @@ std::string CMP_PointerText()
 
 void CMP_PointerTick()
 {
-	auto& s = CMP_Session();
-	if (!s.settings.pointerHud || !s.joined) {
-		return;
-	}
-
-	using clock = std::chrono::steady_clock;
-	const double t = std::chrono::duration<double>(clock::now().time_since_epoch()).count();
-	const double minDt = static_cast<double>(s.settings.pointerSeconds);
-	if (s.lastPointerHud > 0.0 && (t - s.lastPointerHud) < minDt) {
-		return;
-	}
-	s.lastPointerHud = t;
-
-	const auto line = CMP_PointerText();
-	RE::SendHUDMessage::ShowHUDMessage(line.c_str(), "", false, false);
+	// Native compass/map indicators are updated in CMP_IndicatorsTick().
 }
 
 bool CMP_GotoNearest()

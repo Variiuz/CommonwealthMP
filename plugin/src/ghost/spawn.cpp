@@ -1,54 +1,30 @@
 #include "pch.h"
-#include "cmp.h"
+#include "ghost.h"
+#include "ghost/internal.h"
+#include "appearance.h"
+#include "crash.h"
+#include "net.h"
+#include "net/motion_interp.h"
+#include "papyrus_util.h"
+#include "puppet.h"
+#include "session.h"
 
 #include <algorithm>
 #include <chrono>
-#include <cmath>
 #include <mutex>
 #include <unordered_map>
 #include <unordered_set>
-#include <utility>
 
-namespace RE::BSScript
-{
-	IStackCallbackFunctor::~IStackCallbackFunctor() = default;
-}
-
-namespace {
-
-std::uint32_t PlayerLocationForm()
-{
-	auto* player = RE::PlayerCharacter::GetSingleton();
-	if (!player) {
-		return 0;
-	}
-	auto* cell = player->GetParentCell();
-	if (!cell) {
-		return 0;
-	}
-	if (cell->IsInterior()) {
-		return cell->GetFormID();
-	}
-	if (cell->worldSpace) {
-		return cell->worldSpace->GetFormID();
-	}
-	return cell->GetFormID();
-}
+namespace cmp_ghost {
 
 std::mutex g_cloneMutex;
 std::unordered_map<std::uint32_t, RE::TESNPC*> g_peerBases;
 std::unordered_set<std::uint32_t> g_cloneFormIds;
 std::unordered_set<std::uint32_t> g_ghostReady;
+std::unordered_set<std::uint32_t> g_dummyArmed;
 std::unordered_map<std::uint32_t, int> g_freezeTicks;
 std::unordered_map<std::uint32_t, double> g_lastMoveSec;
 bool g_cloneSourceFailed = false;
-
-void SetGhostNote(std::string note)
-{
-	auto& s = CMP_Session();
-	std::lock_guard lock(s.mutex);
-	s.lastGhostNote = std::move(note);
-}
 
 RE::TESNPC* NpcFromForm(RE::TESForm* form)
 {
@@ -164,6 +140,7 @@ void DropPeerClone(std::uint32_t peerId)
 		g_peerBases.erase(it);
 	}
 	g_ghostReady.erase(peerId);
+	g_dummyArmed.erase(peerId);
 	g_freezeTicks.erase(peerId);
 	g_lastMoveSec.erase(peerId);
 	CMP_ResetGhostPuppet(peerId);
@@ -175,6 +152,7 @@ void ClearAllClones()
 	g_peerBases.clear();
 	g_cloneFormIds.clear();
 	g_ghostReady.clear();
+	g_dummyArmed.clear();
 	g_freezeTicks.clear();
 	g_lastMoveSec.clear();
 	g_cloneSourceFailed = false;
@@ -204,66 +182,23 @@ void EnsureGhost3D(RE::Actor* actor)
 	}
 }
 
-template <class... Args>
-void CallActorPapyrus(RE::Actor* actor, const char* fn, Args&&... args)
+void MaybeEquipDummy(RE::Actor* actor, const cmp::PlayerPose& pose)
 {
-	auto* game = RE::GameVM::GetSingleton();
-	if (!game || !actor) {
+	if (!actor || !cmp::is_fake_peer(pose.peerId) || g_dummyArmed.contains(pose.peerId)) {
 		return;
 	}
-	auto vm = game->GetVM();
-	if (!vm) {
-		return;
+	if (actor->biped) {
+		for (int i = 0; i < static_cast<int>(RE::BIPED_OBJECT::kTotal); ++i) {
+			auto* form = actor->biped->object[i].parent.object;
+			if (form && form->As<RE::TESObjectWEAP>()) {
+				g_dummyArmed.insert(pose.peerId);
+				return;
+			}
+		}
 	}
-	auto& handles = vm->GetObjectHandlePolicy();
-	const auto handle = handles.GetHandleForObject(RE::BSScript::GetVMTypeID<RE::Actor>(), actor);
-	if (handle == handles.EmptyHandle()) {
-		return;
-	}
-	RE::BSTSmartPointer<RE::BSScript::IStackCallbackFunctor> cb{};
-	vm->DispatchMethodCall(
-		static_cast<std::uint64_t>(handle),
-		RE::BSFixedString("Actor"),
-		RE::BSFixedString(fn),
-		cb,
-		std::forward<Args>(args)...);
-}
-
-void FreezeGhost(RE::Actor* actor, std::uint32_t peerId)
-{
-	if (!actor) {
-		return;
-	}
-
-	actor->StopCombat();
-	// Do not set kMovementBlocked: it freezes locomotion while we SetPosition the root.
-	actor->boolFlags.set(
-		RE::Actor::BOOL_FLAGS::kAttackingDisabled,
-		RE::Actor::BOOL_FLAGS::kCastingDisabled,
-		RE::Actor::BOOL_FLAGS::kDoNotShowOnStealthMeter,
-		RE::Actor::BOOL_FLAGS::kShouldAnimGraphUpdate);
-	actor->boolFlags.reset(RE::Actor::BOOL_FLAGS::kAttackOnSight);
-	actor->boolFlags.reset(RE::Actor::BOOL_FLAGS::kMovementBlocked);
-
-	int& tick = g_freezeTicks[peerId];
-	++tick;
-	if (tick == 1 || (tick % 30) == 0) {
-		actor->SetLifeState(RE::ACTOR_LIFE_STATE::kAlive);
-		CallActorPapyrus(actor, "EnableAI", false);
-	}
-}
-
-std::string GhostLabel(const cmp::PlayerPose& pose)
-{
-	std::string label = "Player";
-	auto& s = CMP_Session();
-	std::lock_guard lock(s.mutex);
-	if (pose.peerId == s.fakePeerId || pose.peerId == cmp::kFakePeerId) {
-		label = "Dummy";
-	} else if (auto it = s.ghostNames.find(pose.peerId); it != s.ghostNames.end() && !it->second.empty()) {
-		label = it->second;
-	}
-	return label;
+	CMP_EquipGhostFallbackWeapon(actor);
+	g_dummyArmed.insert(pose.peerId);
+	CMP_ResetGhostPuppet(pose.peerId);
 }
 
 void FinishGhostSetup(RE::Actor* actor, const cmp::PlayerPose& pose, const char* path)
@@ -287,8 +222,13 @@ void FinishGhostSetup(RE::Actor* actor, const cmp::PlayerPose& pose, const char*
 	} else {
 		g_ghostReady.insert(pose.peerId);
 		FreezeGhost(actor, pose.peerId);
+		if (cmp::is_fake_peer(pose.peerId)) {
+			CMP_PaintGhostFromLocal(actor);
+		}
 		CMP_ApplyGhostAppearance(actor, pose.peerId);
 		CMP_ApplyGhostInventory(actor, pose.peerId);
+		MaybeEquipDummy(actor, pose);
+		CMP_ReapplyGhostPuppet(pose.peerId);
 		REX::INFO("Ghost {:08X} 3D ready via {}", actor->GetFormID(), path);
 	}
 	SetGhostNote("");
@@ -372,8 +312,12 @@ void MoveGhost(RE::Actor* actor, const cmp::PlayerPose& pose)
 	if (!g_ghostReady.contains(pose.peerId)) {
 		g_ghostReady.insert(pose.peerId);
 		FreezeGhost(actor, pose.peerId);
+		if (cmp::is_fake_peer(pose.peerId)) {
+			CMP_PaintGhostFromLocal(actor);
+		}
 		CMP_ApplyGhostAppearance(actor, pose.peerId);
 		CMP_ApplyGhostInventory(actor, pose.peerId);
+		MaybeEquipDummy(actor, pose);
 		REX::INFO("Ghost {:08X} 3D attached, applied look", actor->GetFormID());
 	} else {
 		FreezeGhost(actor, pose.peerId);
@@ -387,88 +331,65 @@ void MoveGhost(RE::Actor* actor, const cmp::PlayerPose& pose)
 	}
 	g_lastMoveSec[pose.peerId] = now;
 
-	const float poseHz = static_cast<float>(std::max(1, CMP_Session().settings.poseHz));
-	const float halfRtt = 0.5f / poseHz;
-	const float tx = pose.x + pose.vx * halfRtt;
-	const float ty = pose.y + pose.vy * halfRtt;
-	const float tz = pose.z;
-
-	const auto cur = actor->GetPosition();
-	constexpr float snap = 512.0f;
-	float dx = tx - cur.x;
-	float dy = ty - cur.y;
-	float dz = tz - cur.z;
-	float dist = std::sqrt(dx * dx + dy * dy + dz * dz);
-	RE::NiPoint3 next;
-	if (dist > snap || dist < 0.01f) {
-		next = RE::NiPoint3{ tx, ty, tz };
-	} else {
-		const float speed = std::max(pose.speed, 40.0f);
-		const float step = std::min(dist, speed * static_cast<float>(dt) * 1.25f);
-		const float s = step / dist;
-		next = RE::NiPoint3{
-			cur.x + dx * s,
-			cur.y + dy * s,
-			cur.z + dz * s
-		};
-	}
-	actor->SetPosition(next, true);
-	actor->SetHeading(pose.yaw);
-	CMP_ApplyGhostPuppet(actor, pose);
-}
-
-}  // namespace
-
-bool CMP_IsPaintableGhostBase(RE::TESNPC* npc)
-{
-	if (!npc || cmp::forbidden_actor_base(npc->GetFormID())) {
-		return false;
-	}
-	std::lock_guard lock(g_cloneMutex);
-	return g_cloneFormIds.contains(npc->GetFormID());
-}
-
-void CMP_SetGhostLabel(RE::Actor* actor, const char* name)
-{
-	if (!actor || !name || !name[0]) {
-		return;
-	}
-	if (actor->extraList) {
-		actor->extraList->SetOverrideName(name);
-	}
-	if (auto* npc = actor->GetNPC()) {
-		RE::TESFullName::SetFullName(*npc, name);
-	}
-}
-
-int CMP_CountGhostsWith3D()
-{
-	auto& s = CMP_Session();
-	std::lock_guard lock(s.mutex);
-	int n = 0;
-	for (const auto& [id, handle] : s.ghosts) {
-		if (const auto ptr = handle.get()) {
-			if (auto* actor = ptr->As<RE::Actor>(); actor && actor->Get3D()) {
-				++n;
-			}
+	const float delayMs = CMP_EffectiveInterpDelayMs();
+	cmp_motion::SampledTransform sampled;
+	{
+		auto& s = CMP_Session();
+		std::lock_guard lock(s.mutex);
+		auto rit = s.net.poseRing.find(pose.peerId);
+		if (rit != s.net.poseRing.end() && !rit->second.samples.empty()) {
+			const double renderSec = now - static_cast<double>(delayMs) / 1000.0;
+			sampled = cmp_motion::SampleAt(rit->second, renderSec);
 		}
 	}
-	return n;
+	if (!sampled.valid) {
+		sampled.x = pose.x;
+		sampled.y = pose.y;
+		sampled.z = pose.z;
+		sampled.yaw = pose.yaw;
+		sampled.pitch = pose.pitch;
+		sampled.speed = pose.speed;
+		sampled.vx = pose.vx;
+		sampled.vy = pose.vy;
+		sampled.flags = pose.flags;
+		sampled.valid = true;
+	}
+
+	const auto cur = actor->GetPosition();
+	const auto stepped = cmp_motion::StepToward(
+		cur.x, cur.y, cur.z, actor->GetHeading(), sampled, static_cast<float>(dt), delayMs);
+	actor->SetPosition(RE::NiPoint3{ stepped.x, stepped.y, stepped.z }, true);
+	const float heading = CMP_InterpolateHeading(
+		actor->GetHeading(), sampled.yaw, std::clamp(static_cast<float>(dt) * 12.0f, 0.1f, 1.0f));
+	actor->SetHeading(heading);
+	std::uint32_t flags = sampled.flags;
+	{
+		auto& s = CMP_Session();
+		std::lock_guard lock(s.mutex);
+		if (s.ghosts.animOverridePeer == pose.peerId && now < s.ghosts.animOverrideUntil) {
+			flags = s.ghosts.animOverrideFlags;
+		}
+	}
+	CMP_ApplyGhostPuppet(actor, pose.peerId, sampled.pitch, sampled.yaw, sampled.speed, sampled.vx, sampled.vy, flags);
 }
+
+}  // namespace cmp_ghost
 
 void CMP_DespawnGhosts()
 {
 	auto& s = CMP_Session();
 	std::lock_guard lock(s.mutex);
-	for (auto& [id, handle] : s.ghosts) {
+	for (auto& [id, handle] : s.ghosts.byPeer) {
 		if (const auto ptr = handle.get()) {
 			ptr->Disable();
 		}
 	}
-	s.ghosts.clear();
-	s.ghostNames.clear();
+	s.ghosts.byPeer.clear();
+	s.ghosts.names.clear();
 	s.lastGhostNote.clear();
-	ClearAllClones();
+	s.ghosts.animOverridePeer = 0;
+	s.ghosts.animOverrideUntil = 0;
+	cmp_ghost::ClearAllClones();
 }
 
 void CMP_ApplyGhosts()
@@ -479,29 +400,29 @@ void CMP_ApplyGhosts()
 		return;
 	}
 
-	const auto loc = PlayerLocationForm();
+	const auto loc = cmp_ghost::PlayerLocationForm();
 	auto& s = CMP_Session();
 
 	std::unordered_map<std::uint32_t, cmp::PlayerPose> poses;
 	{
 		std::lock_guard lock(s.mutex);
-		poses = s.latestPose;
+		poses = s.net.latestPose;
 	}
 
 	std::unordered_set<std::uint32_t> live;
 	if (!s.settings.ghostSpawn) {
-		SetGhostNote("Ghost.Spawn=0 (join only, no bodies)");
+		cmp_ghost::SetGhostNote("Ghost.Spawn=0 (join only, no bodies)");
 	}
 
 	for (const auto& [peer, pose] : poses) {
-		if (peer == s.myPeerId) {
+		if (peer == s.net.myPeerId) {
 			continue;
 		}
 		if (!s.settings.ghostSpawn) {
 			continue;
 		}
 		if (pose.locationFormId != 0 && loc != 0 && pose.locationFormId != loc) {
-			SetGhostNote("remote in another cell (same-cell ghosts only)");
+			cmp_ghost::SetGhostNote("remote in another cell (same-cell ghosts only)");
 			continue;
 		}
 		live.insert(peer);
@@ -509,32 +430,32 @@ void CMP_ApplyGhosts()
 		RE::Actor* actor = nullptr;
 		{
 			std::lock_guard lock(s.mutex);
-			auto it = s.ghosts.find(peer);
-			if (it != s.ghosts.end()) {
+			auto it = s.ghosts.byPeer.find(peer);
+			if (it != s.ghosts.byPeer.end()) {
 				if (const auto ptr = it->second.get()) {
 					actor = ptr->As<RE::Actor>();
 				}
 			}
 		}
 		if (!actor) {
-			actor = SpawnGhost(pose);
+			actor = cmp_ghost::SpawnGhost(pose);
 			if (!actor) {
 				continue;
 			}
 			std::lock_guard lock(s.mutex);
-			s.ghosts[peer] = actor->GetHandle();
+			s.ghosts.byPeer[peer] = actor->GetHandle();
 		}
-		MoveGhost(actor, pose);
+		cmp_ghost::MoveGhost(actor, pose);
 	}
 
 	std::lock_guard lock(s.mutex);
-	for (auto it = s.ghosts.begin(); it != s.ghosts.end();) {
+	for (auto it = s.ghosts.byPeer.begin(); it != s.ghosts.byPeer.end();) {
 		if (!live.contains(it->first)) {
 			if (const auto ptr = it->second.get()) {
 				ptr->Disable();
 			}
-			DropPeerClone(it->first);
-			it = s.ghosts.erase(it);
+			cmp_ghost::DropPeerClone(it->first);
+			it = s.ghosts.byPeer.erase(it);
 		} else {
 			++it;
 		}

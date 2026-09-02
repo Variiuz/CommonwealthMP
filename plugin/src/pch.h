@@ -5,4 +5,6 @@
 
 #include "cmp_protocol.hpp"
 
+#include <imgui.h>
+
 using namespace std::literals;

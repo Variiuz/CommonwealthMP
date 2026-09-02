@@ -1,5 +1,8 @@
 #include "pch.h"
-#include "cmp.h"
+#include "session.h"
+#include "dump.h"
+#include "crash.h"
+#include "ghost.h"
 
 #include "REX/W32/OLE32.h"
 #include "REX/W32/SHELL32.h"
@@ -409,7 +412,7 @@ std::string CMP_DumpLive()
 	}
 
 	out << "# CommonwealthMP live dump. TSV. Copy this file into the repo as data/dumps/live.txt\n";
-	out << "# Generated for agent lookup of FormIDs, plugins, idles, cells, graph vars, and REL RVAs.\n";
+	out << "# For research\n";
 
 	const auto exe = REX::FModule::GetExecutingModule();
 	out << "\n## runtime\n";
@@ -634,11 +637,11 @@ std::string CMP_DumpLive()
 	{
 		auto& s = CMP_Session();
 		std::lock_guard lock(s.mutex);
-		out << "joined=" << (s.joined ? 1 : 0)
-			<< " peer=" << s.myPeerId
-			<< " host=" << (s.isHost ? 1 : 0)
-			<< " ghosts=" << s.ghosts.size() << '\n';
-		for (const auto& [peer, handle] : s.ghosts) {
+		out << "joined=" << (s.net.joined ? 1 : 0)
+			<< " peer=" << s.net.myPeerId
+			<< " host=" << (s.net.isHost ? 1 : 0)
+			<< " ghosts=" << s.ghosts.byPeer.size() << '\n';
+		for (const auto& [peer, handle] : s.ghosts.byPeer) {
 			auto refr = handle.get();
 			out << "peer=" << peer << '\t';
 			if (!refr) {

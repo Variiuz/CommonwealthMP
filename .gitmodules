@@ -1,3 +1,6 @@
 [submodule "plugin/lib/commonlibf4"]
 	path = plugin/lib/commonlibf4
 	url = https://github.com/libxse/commonlibf4.git
+[submodule "plugin/lib/discord-rpc"]
+	path = plugin/lib/discord-rpc
+	url = https://github.com/discord/discord-rpc.git
