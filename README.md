@@ -22,6 +22,20 @@ You can run around with friends, but do not expect to be able to reliably play :
 
 Animations and world sync are not yet done but partially in, Priority is getting Locomotion, inplace, anims to work. Inventory / DrawWeapons & Player Identity is the next prio.
 
+Below are a few images, more to come!
+
+
+Ingame Images (WIP)
+
+<img width="512" height="300" alt="Ingame Footage of a Monster" src="https://github.com/user-attachments/assets/1c44f3f9-9f26-4796-8ac6-766be718e08e" />
+
+Console (conhost wrapped vs standalone window )
+
+<img width="512" height="300" alt="conhost wrapped" src="https://github.com/user-attachments/assets/a6227b0a-1857-4940-8967-385991cea12a" />
+<img width="512" height="300" alt="custom console window" src="https://github.com/user-attachments/assets/b44f9350-51c6-4509-91fe-459d41aada01" />
+
+
+
 
 
 ## Build the server
