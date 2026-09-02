@@ -11,18 +11,20 @@
 .EXAMPLE
   .\scripts\pack-mo2.ps1
   .\scripts\pack-mo2.ps1 -Build
-  .\scripts\pack-mo2.ps1 -Build -Esp
-  .\scripts\pack-mo2.ps1 -Mo2
-  .\scripts\pack-mo2.ps1 -Mo2 -NoZip
+  .\scripts\pack-mo2.ps1 -Build -ForceRebuild
+  .\scripts\pack-mo2.ps1 -Build -Esp -Esm D:\Steam\steamapps\common\Fallout 4\Data\Fallout4.esm
+  .\scripts\pack-mo2.ps1 -Mo2 -Mo2Path D:\Modding\MO2
+  .\scripts\pack-mo2.ps1 -Mo2 -NoZip -Mo2Path D:\Modding\MO2
   .\scripts\pack-mo2.ps1 -Out D:\cmp-mo2.zip
 #>
 [CmdletBinding()]
 param(
 	[switch]$Build,
+	[switch]$ForceRebuild,
 	[switch]$Esp,
 	[switch]$Mo2,
 	[switch]$NoZip,
-	[string]$Mo2Path = "C:\Modding\MO2",
+	[string]$Mo2Path = "",
 	[string]$Mo2Mods = "",
 	[string]$Dll = "",
 	[string]$Esm = "",
@@ -42,7 +44,7 @@ function Get-CmpVersion([string]$RepoRoot, [string]$Override) {
 			}
 		}
 	}
-	return "0.5.7"
+	throw "Could not read set_version from plugin\xmake.lua. Pass -Version."
 }
 
 function Get-Mo2IniValue([string]$IniPath, [string]$Key) {
@@ -73,7 +75,7 @@ function Write-Utf8([string]$Path, [string]$Text) {
 	[System.IO.File]::WriteAllText($Path, $Text, $utf8)
 }
 
-function Write-Fomod([string]$PackRoot, [string]$Ver, [bool]$HasEsp) {
+function Write-Fomod([string]$PackRoot, [string]$Ver, [bool]$HasEsp, [bool]$HasInterface) {
 	$info = @"
 <?xml version="1.0" encoding="UTF-8"?>
 <fomod>
@@ -90,13 +92,17 @@ function Write-Fomod([string]$PackRoot, [string]$Ver, [bool]$HasEsp) {
 	if ($HasEsp) {
 		$espLine = "    <file source=`"CommonwealthMP.esp`" destination=`"CommonwealthMP.esp`" />`n"
 	}
+	$ifaceLine = ""
+	if ($HasInterface) {
+		$ifaceLine = "    <folder source=`"Interface`" destination=`"Interface`" />`n"
+	}
 	$config = @"
 <?xml version="1.0" encoding="UTF-8"?>
 <config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://qconsulting.ca/fo3/ModConfig5.0.xsd">
   <moduleName>CommonwealthMP</moduleName>
   <requiredInstallFiles>
 $espLine    <folder source="F4SE" destination="F4SE" />
-  </requiredInstallFiles>
+$ifaceLine  </requiredInstallFiles>
 </config>
 "@
 	Write-Utf8 (Join-Path $PackRoot "fomod\info.xml") $info
@@ -121,11 +127,26 @@ function Find-PluginDll([string]$RepoRoot, [string]$Override) {
 function Test-PluginSourcesNewer([string]$RepoRoot, [string]$DllPath) {
 	if (-not (Test-Path -LiteralPath $DllPath)) { return $true }
 	$dllTime = (Get-Item -LiteralPath $DllPath).LastWriteTimeUtc
+	$inputs = @()
 	$srcRoot = Join-Path $RepoRoot "plugin\src"
-	if (-not (Test-Path -LiteralPath $srcRoot)) { return $false }
-	$newer = Get-ChildItem -LiteralPath $srcRoot -Recurse -File |
-		Where-Object { $_.Extension -match '\.(cpp|h|hpp)$' -and $_.LastWriteTimeUtc -gt $dllTime } |
-		Select-Object -First 3
+	if (Test-Path -LiteralPath $srcRoot) {
+		$inputs += @(
+			Get-ChildItem -LiteralPath $srcRoot -Recurse -File |
+				Where-Object { $_.Extension -match '\.(cpp|h|hpp)$' }
+		)
+	}
+	$xmakeLua = Join-Path $RepoRoot "plugin\xmake.lua"
+	if (Test-Path -LiteralPath $xmakeLua) {
+		$inputs += Get-Item -LiteralPath $xmakeLua
+	}
+	$protocol = Join-Path $RepoRoot "protocol"
+	if (Test-Path -LiteralPath $protocol) {
+		$inputs += @(
+			Get-ChildItem -LiteralPath $protocol -File |
+				Where-Object { $_.Extension -match '\.(h|hpp)$' }
+		)
+	}
+	$newer = $inputs | Where-Object { $_.LastWriteTimeUtc -gt $dllTime } | Select-Object -First 1
 	return [bool]$newer
 }
 
@@ -133,8 +154,10 @@ $root = Split-Path -Parent $PSScriptRoot
 $stage = Join-Path $root "mod\CommonwealthMP"
 $ver = Get-CmpVersion $root $Version
 
-if ($Build) {
-	& (Join-Path $PSScriptRoot "build-plugin.ps1")
+if ($Build -or $ForceRebuild) {
+	$buildArgs = @()
+	if ($ForceRebuild) { $buildArgs += "-ForceRebuild" }
+	& (Join-Path $PSScriptRoot "build-plugin.ps1") @buildArgs
 	if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 
@@ -143,9 +166,9 @@ if (-not $dllPath -or -not (Test-Path -LiteralPath $dllPath)) {
 	throw "CommonwealthMP.dll not built. Run with -Build, or scripts\build-plugin.ps1 first."
 }
 
-if (-not $Build -and (Test-PluginSourcesNewer $root $dllPath)) {
+if (-not $Build -and -not $ForceRebuild -and (Test-PluginSourcesNewer $root $dllPath)) {
 	$dllItemWarn = Get-Item -LiteralPath $dllPath
-	Write-Warning ("Plugin sources are newer than DLL ({0:yyyy-MM-dd HH:mm:ss}). Deploying a stale build. Re-run update-mod.ps1 (builds by default)." -f $dllItemWarn.LastWriteTime)
+	Write-Warning ("Plugin sources are newer than DLL ({0:yyyy-MM-dd HH:mm:ss}). Deploying a stale build. Re-run pack-mo2.ps1 -Build." -f $dllItemWarn.LastWriteTime)
 }
 
 $ini = Join-Path $root "data\F4SE\Plugins\CommonwealthMP.ini"
@@ -155,9 +178,11 @@ if (-not (Test-Path -LiteralPath $ini)) {
 
 $espSrc = Join-Path $root "data\CommonwealthMP.esp"
 if ($Esp) {
+	if (-not $Esm) {
+		throw "Pass -Esm with the path to this install's Fallout4.esm."
+	}
 	$gen = Join-Path $PSScriptRoot "gen_esp.py"
-	$pyArgs = @("-3", $gen)
-	if ($Esm) { $pyArgs += @("--esm", $Esm) }
+	$pyArgs = @("-3", $gen, "--esm", $Esm)
 	Write-Host "Generating CommonwealthMP.esp"
 	& py @pyArgs
 	if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -171,8 +196,46 @@ $plugins = Join-Path $stage "F4SE\Plugins"
 New-Item -ItemType Directory -Force -Path $plugins | Out-Null
 Copy-Item -LiteralPath $dllPath -Destination (Join-Path $plugins "CommonwealthMP.dll") -Force
 Copy-Item -LiteralPath $ini -Destination (Join-Path $plugins "CommonwealthMP.ini") -Force
-if ($hasEsp) {
-	Copy-Item -LiteralPath $espSrc -Destination (Join-Path $stage "CommonwealthMP.esp") -Force
+$reporterCandidates = @(
+	(Join-Path $root "tools\cmp-reporter\dist\cmp-reporter.exe"),
+	(Join-Path $root "tools\cmp-reporter\target\release\cmp-reporter.exe")
+)
+$reporterExe = $reporterCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+$hasReporter = $false
+if ($reporterExe) {
+	Copy-Item -LiteralPath $reporterExe -Destination (Join-Path $plugins "cmp-reporter.exe") -Force
+	$hasReporter = $true
+	Write-Host "  F4SE\Plugins\cmp-reporter.exe staged"
+} else {
+	Write-Host "  cmp-reporter.exe skipped (run scripts\build-reporter.ps1 to add crash GUI)"
+}
+	if ($hasEsp) {
+		Copy-Item -LiteralPath $espSrc -Destination (Join-Path $stage "CommonwealthMP.esp") -Force
+	}
+
+$interfaceSwfBuilt = Join-Path $root "interface\swf\CommonwealthMP_Menu.swf"
+$interfaceSwfMod = Join-Path $root "mod\CommonwealthMP\Interface\CommonwealthMP_Menu.swf"
+$interfaceSwf = if (Test-Path -LiteralPath $interfaceSwfBuilt) {
+	$interfaceSwfBuilt
+} elseif (Test-Path -LiteralPath $interfaceSwfMod) {
+	$interfaceSwfMod
+} else {
+	$null
+}
+$hasInterface = $false
+if ($interfaceSwf) {
+	$ifaceDir = Join-Path $stage "Interface"
+	New-Item -ItemType Directory -Force -Path $ifaceDir | Out-Null
+	$ifaceDest = Join-Path $ifaceDir "CommonwealthMP_Menu.swf"
+	$srcFull = [System.IO.Path]::GetFullPath($interfaceSwf)
+	$dstFull = [System.IO.Path]::GetFullPath($ifaceDest)
+	if ($srcFull -ne $dstFull) {
+		Copy-Item -LiteralPath $interfaceSwf -Destination $ifaceDest -Force
+	}
+	$hasInterface = $true
+	Write-Host "  Interface\CommonwealthMP_Menu.swf staged"
+} else {
+	Write-Host "  Interface SWF skipped (run interface\swf\build.ps1 to add pause-menu rows)"
 }
 
 $meta = Join-Path $stage "meta.ini"
@@ -206,6 +269,10 @@ if ($hasEsp) {
 } else {
 	Write-Host "  ESP skipped (optional; pass -Esp to generate)"
 }
+if ($hasReporter) {
+	$repItem = Get-Item -LiteralPath (Join-Path $plugins "cmp-reporter.exe")
+	Write-Host ("  Reporter {0:N0} bytes  {1:yyyy-MM-dd HH:mm:ss}" -f $repItem.Length, $repItem.LastWriteTime)
+}
 
 if (-not $NoZip) {
 	if (-not $Out) {
@@ -226,7 +293,14 @@ if (-not $NoZip) {
 		}
 		Copy-Item -LiteralPath (Join-Path $plugins "CommonwealthMP.dll") -Destination (Join-Path $pack "F4SE\Plugins\CommonwealthMP.dll") -Force
 		Copy-Item -LiteralPath (Join-Path $plugins "CommonwealthMP.ini") -Destination (Join-Path $pack "F4SE\Plugins\CommonwealthMP.ini") -Force
-		Write-Fomod $pack $ver $hasEsp
+		if ($hasReporter) {
+			Copy-Item -LiteralPath (Join-Path $plugins "cmp-reporter.exe") -Destination (Join-Path $pack "F4SE\Plugins\cmp-reporter.exe") -Force
+		}
+		if ($hasInterface) {
+			New-Item -ItemType Directory -Force -Path (Join-Path $pack "Interface") | Out-Null
+			Copy-Item -LiteralPath (Join-Path $stage "Interface\CommonwealthMP_Menu.swf") -Destination (Join-Path $pack "Interface\CommonwealthMP_Menu.swf") -Force
+		}
+		Write-Fomod $pack $ver $hasEsp $hasInterface
 		Compress-Archive -Path (Join-Path $pack "*") -DestinationPath $Out -CompressionLevel Optimal
 	} finally {
 		if (Test-Path -LiteralPath $zipStage) {
@@ -246,6 +320,10 @@ if (-not $NoZip) {
 
 if (-not $Mo2) {
 	exit 0
+}
+
+if (-not $Mo2Path -and -not $Mo2Mods) {
+	throw "Pass -Mo2Path or -Mo2Mods."
 }
 
 $mods = Get-Mo2ModsPath $Mo2Path $Mo2Mods
@@ -270,8 +348,16 @@ try {
 	throw "Failed to copy DLL into MO2 (is Fallout 4 still locking it?): $destDll`n$_"
 }
 Copy-Item -LiteralPath (Join-Path $plugins "CommonwealthMP.ini") -Destination $destIni -Force
+if ($hasReporter) {
+	Copy-Item -LiteralPath (Join-Path $plugins "cmp-reporter.exe") -Destination (Join-Path $dest "F4SE\Plugins\cmp-reporter.exe") -Force
+}
 if ($hasEsp) {
 	Copy-Item -LiteralPath (Join-Path $stage "CommonwealthMP.esp") -Destination $destEsp -Force
+}
+if ($hasInterface) {
+	$destIface = Join-Path $dest "Interface"
+	New-Item -ItemType Directory -Force -Path $destIface | Out-Null
+	Copy-Item -LiteralPath (Join-Path $stage "Interface\CommonwealthMP_Menu.swf") -Destination (Join-Path $destIface "CommonwealthMP_Menu.swf") -Force
 }
 Copy-Item -LiteralPath $meta -Destination (Join-Path $dest "meta.ini") -Force
 
@@ -288,5 +374,12 @@ Write-Host ("  INI {0:N0} bytes  {1:yyyy-MM-dd HH:mm:ss}" -f $destIniItem.Length
 if ($hasEsp -and (Test-Path -LiteralPath $destEsp)) {
 	$destEspItem = Get-Item -LiteralPath $destEsp
 	Write-Host ("  ESP {0:N0} bytes  {1:yyyy-MM-dd HH:mm:ss}" -f $destEspItem.Length, $destEspItem.LastWriteTime)
+}
+if ($hasInterface) {
+	$destSwf = Join-Path $dest "Interface\CommonwealthMP_Menu.swf"
+	if (Test-Path -LiteralPath $destSwf) {
+		$destSwfItem = Get-Item -LiteralPath $destSwf
+		Write-Host ("  SWF {0:N0} bytes  {1:yyyy-MM-dd HH:mm:ss}" -f $destSwfItem.Length, $destSwfItem.LastWriteTime)
+	}
 }
 Write-Host "Did not touch plugins.txt / modlist.txt. Enable the mod and ESP in MO2 if needed."

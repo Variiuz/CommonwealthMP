@@ -14,7 +14,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "data" / "CommonwealthMP.esp"
-DEFAULT_ESM = Path(r"U:\SteamLibrary\steamapps\common\Fallout 4\Data\Fallout4.esm")
 
 REC_HDR = 24
 FLAG_COMPRESSED = 0x00040000
@@ -330,7 +329,7 @@ def verify_esp(path: Path) -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--esm", type=Path, default=DEFAULT_ESM)
+    ap.add_argument("--esm", type=Path, required=True)
     ap.add_argument("--dump-only", action="store_true")
     args = ap.parse_args()
     if not args.esm.is_file():
