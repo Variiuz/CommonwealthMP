@@ -207,7 +207,7 @@ void ApplyToNpc(RE::TESNPC* dest, Reader& r, RE::Actor* actor)
 	// Write onto the clone's own headParts only. Do not touch
 	// TESNPC::GetAlternateHeadPartListMap(): that global's CommonLib
 	// relocation has been crashing RtlFreeHeap on join/appearance apply
-	// (fake and real peers). Clones keep originalRace == formRace so the
+	// Clones keep originalRace == formRace so the
 	// engine does not read the alternate map for them anyway.
 	dest->faceNPC = nullptr;
 	if (!parts.empty()) {

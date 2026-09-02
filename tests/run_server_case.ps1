@@ -3,7 +3,6 @@ param(
 	[Parameter(Mandatory = $true)][string]$Cases,
 	[Parameter(Mandatory = $true)][string]$Case,
 	[int]$Port = 17778,
-	[switch]$NoFake,
 	[string]$ExtraArgs = ""
 )
 
@@ -23,9 +22,6 @@ $serverArgs = @(
 	"--session-dir", $session,
 	"--log-file", $log
 )
-if ($NoFake) {
-	$serverArgs += "--no-fake"
-}
 if ($ExtraArgs) {
 	$serverArgs += ($ExtraArgs -split '\s+')
 }

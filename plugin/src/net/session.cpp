@@ -34,8 +34,9 @@ void HeartbeatLoop()
 		if (!s.net.joined || s.net.myPeerId == 0) {
 			continue;
 		}
-		const auto hb = cmp::make_heartbeat(s.net.myPeerId);
-		cmp_udp_send(s.settings.host.c_str(), s.settings.port, &hb, static_cast<int>(sizeof(hb)));
+		const auto stamp = static_cast<std::uint32_t>(cmp_net::NowSec() * 1000.0);
+		const auto hb = cmp::make_heartbeat(s.net.myPeerId, stamp);
+		cmp_net_tcp_send(&hb, static_cast<int>(sizeof(hb)));
 	}
 }
 
@@ -81,7 +82,6 @@ std::string CMP_StatusText()
 		  << " interior=" << (world.interior ? 1 : 0)
 		  << " loc=" << std::hex << std::uppercase << world.location << std::dec
 		  << " new=" << (s.net.isNewPlayer ? "yes" : "no")
-		  << " fake=" << s.net.fakePeerId
 		  << " ip=" << s.settings.host << ":" << s.settings.port
 		  << " key=" << s.settings.playerKey
 		  << " remotes=" << s.net.latestPose.size()
@@ -104,17 +104,13 @@ std::string CMP_StatusText()
 			if (peer == s.net.myPeerId) {
 				continue;
 			}
-			if (s.net.fakePeerId != 0 && peer == s.net.fakePeerId) {
-				best = &pose;
-				break;
-			}
 			if (!best) {
 				best = &pose;
 			}
 		}
 		if (best) {
 			o << " spd=" << static_cast<int>(best->speed)
-			  << " anim=" << cmp::fake_anim_name(best->flags)
+			  << " anim=" << cmp::pose_anim_name(best->flags)
 			  << " drawn=" << (cmp::has_pose_flag(best->flags, cmp::PoseFlag::Drawn) ? 1 : 0)
 			  << " atk=" << (cmp::has_pose_flag(best->flags, cmp::PoseFlag::Attacking) ? 1 : 0)
 			  << " rld=" << (cmp::has_pose_flag(best->flags, cmp::PoseFlag::Reloading) ? 1 : 0)
@@ -136,8 +132,8 @@ bool CMP_Join(std::string host, std::uint16_t port, std::uint8_t flags)
 {
 	CMP_Leave();
 	auto& s = CMP_Session();
-	if (!cmp_udp_startup()) {
-		s.lastStatus = "udp startup failed";
+	if (!cmp_net_startup()) {
+		s.lastStatus = "net startup failed";
 		CMP_Print(s.lastStatus);
 		return false;
 	}
@@ -149,6 +145,8 @@ bool CMP_Join(std::string host, std::uint16_t port, std::uint8_t flags)
 	s.net.haveSnapshot = false;
 	s.net.isHost = false;
 	s.net.isNewPlayer = false;
+	s.net.udpToken = 0;
+	s.net.udpBound = false;
 	s.lastReject.clear();
 
 	const auto world = cmp_net::ReadLocalWorld();
@@ -156,7 +154,14 @@ bool CMP_Join(std::string host, std::uint16_t port, std::uint8_t flags)
 		s.lastStatus = "not in world (load any save first)";
 		CMP_Print(s.lastStatus);
 		RE::SendHUDMessage::ShowHUDMessage(s.lastStatus.c_str(), "", false, false);
-		cmp_udp_shutdown();
+		cmp_net_shutdown();
+		return false;
+	}
+
+	if (!cmp_net_tcp_connect(s.settings.host.c_str(), s.settings.port)) {
+		s.lastStatus = "tcp connect failed (bad host?)";
+		CMP_Print(s.lastStatus);
+		cmp_net_shutdown();
 		return false;
 	}
 
@@ -175,10 +180,10 @@ bool CMP_Join(std::string host, std::uint16_t port, std::uint8_t flags)
 		flags,
 		CMP_ComputeModHash(),
 		s.settings.password);
-	if (!cmp_udp_send(s.settings.host.c_str(), s.settings.port, &hello, static_cast<int>(sizeof(hello)))) {
-		s.lastStatus = "send Hello failed (bad host?)";
+	if (!cmp_net_tcp_send(&hello, static_cast<int>(sizeof(hello)))) {
+		s.lastStatus = "send Hello failed";
 		CMP_Print(s.lastStatus);
-		cmp_udp_shutdown();
+		cmp_net_shutdown();
 		return false;
 	}
 
@@ -199,22 +204,22 @@ bool CMP_Join(std::string host, std::uint16_t port, std::uint8_t flags)
 void CMP_Leave()
 {
 	auto& s = CMP_Session();
-	if (s.net.joined) {
+	if (s.net.joined && cmp_net_tcp_connected()) {
 		const auto bye = cmp::make_bye(s.net.myPeerId);
-		cmp_udp_send(s.settings.host.c_str(), s.settings.port, &bye, static_cast<int>(sizeof(bye)));
+		cmp_net_tcp_send(&bye, static_cast<int>(sizeof(bye)));
 	}
 	cmp_net::StopHeartbeat();
-	CMP_Reliable_Reset();
-	cmp_udp_shutdown();
+	cmp_net_shutdown();
 	CMP_DespawnGhosts();
 	CMP_IndicatorsClear();
 	s.net.joined = false;
 	s.net.myPeerId = 0;
-	s.net.fakePeerId = 0;
 	s.net.isHost = false;
 	s.net.isNewPlayer = false;
 	s.net.haveSnapshot = false;
 	s.net.snapshotApplied = false;
+	s.net.udpToken = 0;
+	s.net.udpBound = false;
 	{
 		std::lock_guard lock(s.mutex);
 		s.net.incoming.clear();

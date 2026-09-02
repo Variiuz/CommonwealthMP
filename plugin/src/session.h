@@ -45,7 +45,6 @@ struct QueuedPose {
 struct NetRuntime {
 	bool joined{ false };
 	std::uint32_t myPeerId{ 0 };
-	std::uint32_t fakePeerId{ 0 };
 	bool isHost{ false };
 	bool isNewPlayer{ false };
 	std::vector<QueuedPose> incoming;
@@ -64,6 +63,8 @@ struct NetRuntime {
 	float measuredRttMs{ 0.0f };
 	double joinSentSec{ 0.0 };
 	double lastHelloRetrySec{ 0.0 };
+	std::uint32_t udpToken{ 0 };
+	bool udpBound{ false };
 };
 
 struct GhostRuntime {

@@ -2,19 +2,25 @@
 
 CommonwealthMP (short CMP) is a multiplayer mod for Fallout 4. It is early development and not yet reliably playable: open-source, free, not feature-complete. Focus is the dedicated server and F4SE plugin.
 
+> **Warning:** This is a work-in-progress. Code may not compile or run, games can crash randomly, and save files may be corrupted. Use at your own risk.
+
 ## Current State
+
+
 Currently it is "playable" in the streched sense: 2+ players can join a host world and see each other.
 Guests join by IP; they do not share a save; this means progress SHOULD only happen on the host. The plugin is not yet stable; crashes are expected. The server is a separate process and does not require Fallout 4. The UI is bad, I am not really familiar with swfs etc but i try my best. Main goal is animations, inventory, appareance, world sync.
 
 Wire protocol is **11**. 
 
 Target runtime: Steam **1.11.240**, F4SE **0.7.9**.
-Server: `CommonwealthMP.Server` (UDP 7777 by default). Client: F4SE plugin `CommonwealthMP.dll`.
+Server: `CommonwealthMP.Server` (TCP+UDP 7777 by default). Client: F4SE plugin `CommonwealthMP.dll`.
 
 ## Playability
 
 I would not call it "playable" yet. It is a work-in-progress, and the plugin is not stable. Expect crashes, desyncs, and other rather weird issues :D
 You can run around with friends, but do not expect to be able to reliably play :)
+
+Animations, world sync are not yet done, Priority is getting Locomotion, inplace, anims to work. Inventory / DrawWeapons & Player Identity to work.
 
 
 ## Build the server

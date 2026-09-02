@@ -114,7 +114,7 @@ void OnHitEvent(const RE::TESHitEvent& ev)
 	}
 
 	const auto peer = CMP_PeerForGhost(target);
-	if (!peer || cmp::is_fake_peer(peer)) {
+	if (!peer) {
 		return;
 	}
 
@@ -154,7 +154,7 @@ void OnHitEvent(const RE::TESHitEvent& ev)
 	g_lastHitSend[peer] = now;
 
 	const auto msg = cmp::make_hit(s.net.myPeerId, peer, damage);
-	CMP_Reliable_Send(&msg, static_cast<int>(sizeof(msg)));
+	CMP_Net_Send(&msg, static_cast<int>(sizeof(msg)));
 }
 
 }  // namespace

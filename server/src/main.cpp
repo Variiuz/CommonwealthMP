@@ -1,11 +1,13 @@
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -17,6 +19,7 @@
 #include "config.hpp"
 #include "handlers.hpp"
 #include "log.hpp"
+#include "net_io.hpp"
 #include "server_state.hpp"
 
 std::atomic<bool> g_running{ true };
@@ -108,9 +111,6 @@ int main(int argc, char** argv)
 		const std::string arg = argv[i];
 		if (arg == "--help" || arg == "-h") { print_usage(); return 0; }
 		if (arg == "--config" && i + 1 < argc) { ++i; continue; }
-		if (arg == "--fake") { cfg.fake = true; continue; }
-		if (arg == "--no-fake") { cfg.fake = false; continue; }
-		if (arg == "--fake-count" && i + 1 < argc) { cfg.fakeCount = cmp::clamp_fake_count(std::stoi(argv[++i])); continue; }
 		if (arg == "--reset-session") { cfg.resetSession = true; continue; }
 		if (arg == "--verbose") { cfg.verbose = true; cfg.quiet = false; continue; }
 		if (arg == "--quiet") { cfg.quiet = true; cfg.verbose = false; continue; }
@@ -140,7 +140,7 @@ int main(int argc, char** argv)
 	LOG_INFO("CommonwealthMP.Server %s (%s) starting", kServerVersion, CMP_GIT_VERSION);
 	if (createdIni) LOG_INFO("wrote default config %s", configPath.c_str());
 	LOG_INFO("config=%s", configPath.c_str());
-	LOG_INFO("name=%s port=%u max_players=%d fake=%s fake_count=%d interest_uu=%.0f pvp=%s", cfg.name.c_str(), static_cast<unsigned>(cfg.port), cfg.maxPlayers, cfg.fake ? "on" : "off", cfg.fakeCount, cfg.interestUu, cfg.pvp ? "on" : "off");
+	LOG_INFO("name=%s port=%u max_players=%d interest_uu=%.0f pvp=%s", cfg.name.c_str(), static_cast<unsigned>(cfg.port), cfg.maxPlayers, cfg.interestUu, cfg.pvp ? "on" : "off");
 	if (!cfg.motd.empty()) LOG_INFO("motd=%s", cfg.motd.c_str());
 	LOG_INFO("session=%s", session_dir().string().c_str());
 	LOG_INFO("log file: %s (DEBUG in file, %s on console%s)", ServerLog::instance().path().c_str(), cfg.verbose ? "DEBUG" : (cfg.quiet ? "WARN+" : "INFO"), cfg.jsonLog ? ", json events" : "");
@@ -156,28 +156,39 @@ int main(int argc, char** argv)
 	if (cfg.modHash != 0) LOG_INFO("mod_hash pinned 0x%08X", cfg.modHash);
 	if (!cfg.password.empty()) LOG_INFO("password gate enabled");
 	if (!cmp::udp_startup()) { LOG_ERROR("socket startup failed err=%d", cmp::udp_last_error()); return 1; }
-	CmpSocket sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-	if (sock == kCmpInvalidSocket) { LOG_ERROR("socket failed err=%d", cmp::udp_last_error()); cmp::udp_cleanup(); return 1; }
+	CmpSocket udpSock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+	if (udpSock == kCmpInvalidSocket) { LOG_ERROR("udp socket failed err=%d", cmp::udp_last_error()); cmp::udp_cleanup(); return 1; }
+	CmpSocket tcpListen = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+	if (tcpListen == kCmpInvalidSocket) { LOG_ERROR("tcp socket failed err=%d", cmp::udp_last_error()); cmp::udp_close(udpSock); cmp::udp_cleanup(); return 1; }
 	int reuse = 1;
-	setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&reuse), sizeof(reuse));
+	setsockopt(udpSock, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&reuse), sizeof(reuse));
+	setsockopt(tcpListen, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&reuse), sizeof(reuse));
 	sockaddr_in bindAddr{};
 	bindAddr.sin_family = AF_INET; bindAddr.sin_addr.s_addr = htonl(INADDR_ANY); bindAddr.sin_port = htons(cfg.port);
-	if (bind(sock, reinterpret_cast<sockaddr*>(&bindAddr), sizeof(bindAddr)) != 0) { LOG_ERROR("bind failed on UDP %u err=%d", static_cast<unsigned>(cfg.port), cmp::udp_last_error()); cmp::udp_close(sock); cmp::udp_cleanup(); return 1; }
-	if (!cmp::udp_set_nonblock(sock)) { LOG_ERROR("nonblock failed err=%d", cmp::udp_last_error()); cmp::udp_close(sock); cmp::udp_cleanup(); return 1; }
-	LOG_INFO("listening UDP 0.0.0.0:%u", static_cast<unsigned>(cfg.port));
-	LOG_INFO("fake peers: %s count=%d (off at 2 clients)", cfg.fake ? "on" : "off", cfg.fakeCount);
+	if (bind(udpSock, reinterpret_cast<sockaddr*>(&bindAddr), sizeof(bindAddr)) != 0) { LOG_ERROR("bind failed on UDP %u err=%d", static_cast<unsigned>(cfg.port), cmp::udp_last_error()); cmp::udp_close(udpSock); cmp::udp_close(tcpListen); cmp::udp_cleanup(); return 1; }
+	if (bind(tcpListen, reinterpret_cast<sockaddr*>(&bindAddr), sizeof(bindAddr)) != 0) { LOG_ERROR("bind failed on TCP %u err=%d", static_cast<unsigned>(cfg.port), cmp::udp_last_error()); cmp::udp_close(udpSock); cmp::udp_close(tcpListen); cmp::udp_cleanup(); return 1; }
+	if (listen(tcpListen, 16) != 0) { LOG_ERROR("listen failed on TCP %u err=%d", static_cast<unsigned>(cfg.port), cmp::udp_last_error()); cmp::udp_close(udpSock); cmp::udp_close(tcpListen); cmp::udp_cleanup(); return 1; }
+	if (!cmp::udp_set_nonblock(udpSock) || !cmp::udp_set_nonblock(tcpListen)) { LOG_ERROR("nonblock failed err=%d", cmp::udp_last_error()); cmp::udp_close(udpSock); cmp::udp_close(tcpListen); cmp::udp_cleanup(); return 1; }
+	LOG_INFO("listening TCP+UDP 0.0.0.0:%u", static_cast<unsigned>(cfg.port));
 	LOG_INFO("Join from FO4: load any save, cmp_join 127 0 0 1 %u (guests meet host exterior). Menu join requires a live host.", static_cast<unsigned>(cfg.port));
 	LOG_INFO("Type 'help' for admin commands");
 
-	ServerRuntime runtime(sock, cfg, world, players, bannedKeys, cfg.modHash);
-	FakeTickState fakeState{ now_sec() };
+	ServerRuntime runtime(cfg, world, players, bannedKeys, cfg.modHash);
+	AsyncQueue<InboundEvent> inbound(8192);
+	AsyncQueue<OutboundCmd> outbound(8192);
+	PersistWorker persistWorker;
+	runtime.outbound = &outbound;
+	runtime.persist = &persistWorker;
+	persistWorker.start();
+	NetIo netIo(udpSock, tcpListen, inbound, outbound);
+	netIo.start();
 	auto lastPersist = now_sec(), lastStatusBar = now_sec(), lastStatusLog = now_sec(), lastHeartbeat = now_sec();
 	ProcStats procStats{};
 	sample_proc_stats(procStats);
 	if (!cfg.quiet) {
 		ServerLog::instance().set_status_enabled(true);
 		char bar[256]{};
-		std::snprintf(bar, sizeof(bar), "CMP %s :%u | %zu/%d | host %u | fake %s | rx %llu | cpu %.0f%% | mem %.0fMB", kServerVersion, static_cast<unsigned>(cfg.port), static_cast<std::size_t>(0), cfg.maxPlayers, world.hostPeerId, runtime.fakeWanted ? "on" : "off", static_cast<unsigned long long>(0), procStats.cpuPercent, procStats.memMb);
+		std::snprintf(bar, sizeof(bar), "CMP %s :%u | %zu/%d | host %u | rx %llu | cpu %.0f%% | mem %.0fMB", kServerVersion, static_cast<unsigned>(cfg.port), static_cast<std::size_t>(0), cfg.maxPlayers, world.hostPeerId, static_cast<unsigned long long>(0), procStats.cpuPercent, procStats.memMb);
 		ServerLog::instance().set_status(bar);
 #ifdef _WIN32
 		if (winConsoleActive) g_winConsole.set_title(bar);
@@ -188,51 +199,60 @@ int main(int argc, char** argv)
 	AdminContext adminCtx{ runtime, configPath };
 	while (g_running) {
 		const double t = now_sec();
-		const bool fakeActive = runtime.fakeWanted && runtime.clients.size() < 2;
 		std::string cmdLine;
 #ifdef _WIN32
 		while (useAdminConsole ? admin.poll(cmdLine) : g_winConsole.poll(cmdLine)) run_admin_command(cmdLine, adminCtx);
 #else
 		while (admin.poll(cmdLine)) run_admin_command(cmdLine, adminCtx);
 #endif
-		for (;;) {
-			char buf[kMaxDatagram]{};
-			sockaddr_in from{};
-			CmpSockLen fromLen = sizeof(from);
-			const int n = recvfrom(sock, buf, sizeof(buf), 0, reinterpret_cast<sockaddr*>(&from), &fromLen);
-			if (n == SOCKET_ERROR) { const int err = cmp::udp_last_error(); if (!cmp::udp_would_block(err)) LOG_WARN("recvfrom err=%d", err); break; }
-			if (n == 0) break;
-			runtime.handle_packet(buf, n, from, t);
+		InboundEvent ev;
+		while (inbound.try_pop(ev)) {
+			runtime.apply_inbound(ev, t);
 		}
+		runtime.expire_pending(t);
 		runtime.expire_clients(t);
-		runtime.tick_reliable(t);
-		if (fakeActive) tick_fake_peers(sock, runtime.clients, world, runtime.fakeCount, t, runtime.datagrams, runtime.badHeaders, runtime.fakeWasOn, fakeState);
-		if (t - lastPersist >= kPersistIntervalSec) { lastPersist = t; flush_dirty(world, runtime.worldDirty, players, runtime.dirtyPlayers); }
+		if (t - lastPersist >= kPersistIntervalSec) { lastPersist = t; runtime.flush_dirty_async(); }
 		if (t - lastHeartbeat >= 5.0) { lastHeartbeat = t; runtime.send_heartbeat(); }
 		if (t - lastStatusBar >= kStatusBarIntervalSec) {
 			lastStatusBar = t; sample_proc_stats(procStats);
 			char bar[256]{};
-			std::snprintf(bar, sizeof(bar), "CMP %s :%u | %zu/%d | host %u | fake %s | rx %llu | cpu %.0f%% | mem %.0fMB", kServerVersion, static_cast<unsigned>(cfg.port), runtime.clients.size(), cfg.maxPlayers, world.hostPeerId, runtime.fakeWanted ? "on" : "off", static_cast<unsigned long long>(runtime.datagrams), procStats.cpuPercent, procStats.memMb);
+			std::snprintf(bar, sizeof(bar), "CMP %s :%u | %zu/%d | host %u | rx %llu | cpu %.0f%% | mem %.0fMB", kServerVersion, static_cast<unsigned>(cfg.port), runtime.clients.size(), cfg.maxPlayers, world.hostPeerId, static_cast<unsigned long long>(runtime.datagrams), procStats.cpuPercent, procStats.memMb);
 			if (!cfg.quiet) { ServerLog::instance().set_status(bar);
 #ifdef _WIN32
 				if (winConsoleActive) g_winConsole.set_title(bar);
 #endif
 			}
-			if (t - lastStatusLog >= kStatusLogIntervalSec) { lastStatusLog = t; LOG_DEBUG("status name=%s port=%u clients=%zu/%d host=%u fake=%s datagrams=%llu bad=%llu cpu=%.1f mem=%.1fMB", cfg.name.c_str(), static_cast<unsigned>(cfg.port), runtime.clients.size(), cfg.maxPlayers, world.hostPeerId, runtime.fakeWanted ? "on" : "off", static_cast<unsigned long long>(runtime.datagrams), static_cast<unsigned long long>(runtime.badHeaders), procStats.cpuPercent, procStats.memMb); }
+			if (t - lastStatusLog >= kStatusLogIntervalSec) { lastStatusLog = t; LOG_DEBUG("status name=%s port=%u clients=%zu/%d host=%u datagrams=%llu bad=%llu cpu=%.1f mem=%.1fMB", cfg.name.c_str(), static_cast<unsigned>(cfg.port), runtime.clients.size(), cfg.maxPlayers, world.hostPeerId, static_cast<unsigned long long>(runtime.datagrams), static_cast<unsigned long long>(runtime.badHeaders), procStats.cpuPercent, procStats.memMb); }
 		}
-		cmp::udp_poll_in(sock, 5);
+		std::this_thread::sleep_for(std::chrono::milliseconds(1));
 	}
 	ServerLog::instance().set_status_enabled(false);
 	if (useAdminConsole) admin.stop();
 #ifdef _WIN32
 	g_winConsole.stop();
 #endif
-	flush_dirty(world, runtime.worldDirty, players, runtime.dirtyPlayers);
-	for (const auto& [_, rec] : players) persist_player(rec);
-	persist_world(world);
+	netIo.stop();
+	{
+		InboundEvent ev;
+		const double t = now_sec();
+		while (inbound.try_pop(ev)) {
+			runtime.apply_inbound(ev, t);
+		}
+	}
+	for (const auto& [_, c] : runtime.clients) runtime.dirtyPlayers.insert(c.playerKey);
+	runtime.worldDirty = true;
+	runtime.flush_dirty_async();
+	{
+		PersistJob finalJob;
+		finalJob.world = true;
+		finalJob.worldSnap = world;
+		for (const auto& [_, rec] : players) finalJob.players.push_back(rec);
+		persistWorker.enqueue_blocking(std::move(finalJob));
+	}
+	persistWorker.stop();
 	ServerLog::instance().flush();
-	LOG_INFO("closing socket clients=%zu datagrams=%llu badHeaders=%llu", runtime.clients.size(), static_cast<unsigned long long>(runtime.datagrams), static_cast<unsigned long long>(runtime.badHeaders));
-	cmp::udp_close(sock); cmp::udp_cleanup();
+	LOG_INFO("closing sockets clients=%zu datagrams=%llu badHeaders=%llu", runtime.clients.size(), static_cast<unsigned long long>(runtime.datagrams), static_cast<unsigned long long>(runtime.badHeaders));
+	cmp::udp_close(tcpListen); cmp::udp_close(udpSock); cmp::udp_cleanup();
 	LOG_INFO("stopped");
 	return 0;
 }

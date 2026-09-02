@@ -1,4 +1,5 @@
 #include "cmp_blobs.hpp"
+#include "cmp_net.hpp"
 #include "cmp_protocol.hpp"
 #include "cmp_udp.hpp"
 
@@ -45,50 +46,6 @@ struct Options {
 	std::string which;
 };
 
-struct UdpClient {
-	CmpSocket sock{ kCmpInvalidSocket };
-	sockaddr_in dest{};
-
-	bool open(const char* host, std::uint16_t port)
-	{
-		sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-		if (sock == kCmpInvalidSocket) {
-			return false;
-		}
-		sockaddr_in local{};
-		local.sin_family = AF_INET;
-		local.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-		local.sin_port = 0;
-		if (bind(sock, reinterpret_cast<sockaddr*>(&local), sizeof(local)) != 0) {
-			return false;
-		}
-		cmp::udp_set_recv_timeout_ms(sock, 200);
-		dest.sin_family = AF_INET;
-		dest.sin_port = htons(port);
-		return inet_pton(AF_INET, host, &dest.sin_addr) == 1;
-	}
-
-	void close()
-	{
-		if (sock != kCmpInvalidSocket) {
-			cmp::udp_close(sock);
-			sock = kCmpInvalidSocket;
-		}
-	}
-
-	bool send(const void* data, int len)
-	{
-		return sendto(sock, static_cast<const char*>(data), len, 0, reinterpret_cast<sockaddr*>(&dest), sizeof(dest)) == len;
-	}
-
-	int recv(char* buf, int cap)
-	{
-		sockaddr_in from{};
-		CmpSockLen fromLen = sizeof(from);
-		return recvfrom(sock, buf, cap, 0, reinterpret_cast<sockaddr*>(&from), &fromLen);
-	}
-};
-
 struct Inbox {
 	cmp::Welcome welcome{};
 	bool haveWelcome{ false };
@@ -110,68 +67,179 @@ struct Inbox {
 	bool haveInventory{ false };
 };
 
+struct NetClient {
+	CmpSocket tcp{ kCmpInvalidSocket };
+	CmpSocket udp{ kCmpInvalidSocket };
+	sockaddr_in dest{};
+	std::vector<std::uint8_t> tcpRecv;
+	std::uint32_t peerId{ 0 };
+	std::uint32_t udpToken{ 0 };
+
+	bool open(const char* host, std::uint16_t port)
+	{
+		if (tcp != kCmpInvalidSocket) {
+			cmp::udp_close(tcp);
+			tcp = kCmpInvalidSocket;
+		}
+		if (udp != kCmpInvalidSocket) {
+			cmp::udp_close(udp);
+			udp = kCmpInvalidSocket;
+		}
+		tcpRecv.clear();
+		peerId = 0;
+		udpToken = 0;
+		udp = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+		if (udp == kCmpInvalidSocket) {
+			return false;
+		}
+		sockaddr_in local{};
+		local.sin_family = AF_INET;
+		local.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+		local.sin_port = 0;
+		if (bind(udp, reinterpret_cast<sockaddr*>(&local), sizeof(local)) != 0) {
+			return false;
+		}
+		cmp::udp_set_recv_timeout_ms(udp, 50);
+		dest.sin_family = AF_INET;
+		dest.sin_port = htons(port);
+		if (inet_pton(AF_INET, host, &dest.sin_addr) != 1) {
+			return false;
+		}
+		tcp = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+		if (tcp == kCmpInvalidSocket) {
+			return false;
+		}
+		cmp::tcp_set_nodelay(tcp);
+		if (connect(tcp, reinterpret_cast<sockaddr*>(&dest), sizeof(dest)) != 0) {
+			return false;
+		}
+		cmp::udp_set_recv_timeout_ms(tcp, 50);
+		return true;
+	}
+
+	void close()
+	{
+		if (tcp != kCmpInvalidSocket) {
+			cmp::udp_close(tcp);
+			tcp = kCmpInvalidSocket;
+		}
+		if (udp != kCmpInvalidSocket) {
+			cmp::udp_close(udp);
+			udp = kCmpInvalidSocket;
+		}
+		tcpRecv.clear();
+	}
+
+	bool send_tcp(const void* data, int len)
+	{
+		return cmp::tcp_send_msg(tcp, data, len);
+	}
+
+	bool send_udp(const void* data, int len)
+	{
+		return sendto(udp, static_cast<const char*>(data), len, 0, reinterpret_cast<sockaddr*>(&dest), sizeof(dest)) == len;
+	}
+
+	bool send(const void* data, int len)
+	{
+		if (!data || len <= 0) {
+			return false;
+		}
+		if (len >= static_cast<int>(sizeof(cmp::Header))) {
+			const auto* h = static_cast<const cmp::Header*>(data);
+			if (std::memcmp(h->magic, cmp::kMagic, 4) == 0
+				&& cmp::msg_is_tcp(static_cast<cmp::Msg>(h->type))
+				&& static_cast<int>(h->size) == len) {
+				return send_tcp(data, len);
+			}
+		}
+		return send_udp(data, len);
+	}
+};
+
+using UdpClient = NetClient;
+
+void ingest(Inbox& in, const char* buf, int got)
+{
+	cmp::Header header{};
+	std::memcpy(&header, buf, sizeof(header));
+	if (!cmp::header_ok(header, static_cast<std::size_t>(got))) {
+		return;
+	}
+	const auto type = static_cast<cmp::Msg>(header.type);
+	if (type == cmp::Msg::Welcome && got >= static_cast<int>(sizeof(cmp::Welcome))) {
+		std::memcpy(&in.welcome, buf, sizeof(in.welcome));
+		in.haveWelcome = true;
+	} else if (type == cmp::Msg::WorldSnapshot && got >= static_cast<int>(sizeof(cmp::WorldSnapshot))) {
+		std::memcpy(&in.snap, buf, sizeof(in.snap));
+		in.haveSnap = true;
+	} else if (type == cmp::Msg::Reject && got >= static_cast<int>(sizeof(cmp::Reject))) {
+		std::memcpy(&in.reject, buf, sizeof(in.reject));
+		in.haveReject = true;
+	} else if (type == cmp::Msg::SessionInfo && got >= static_cast<int>(sizeof(cmp::SessionInfo))) {
+		std::memcpy(&in.session, buf, sizeof(in.session));
+		in.haveSession = true;
+	} else if (type == cmp::Msg::PlayerPose && got >= static_cast<int>(sizeof(cmp::PlayerPose))) {
+		cmp::PlayerPose pose{};
+		std::memcpy(&pose, buf, sizeof(pose));
+		in.poses.push_back(pose);
+	} else if (type == cmp::Msg::ActorPose && got >= static_cast<int>(sizeof(cmp::ActorPose))) {
+		cmp::ActorPose pose{};
+		std::memcpy(&pose, buf, sizeof(pose));
+		in.actors.push_back(pose);
+	} else if (type == cmp::Msg::Hit && got >= static_cast<int>(sizeof(cmp::Hit))) {
+		cmp::Hit hit{};
+		std::memcpy(&hit, buf, sizeof(hit));
+		in.hits.push_back(hit);
+	} else if (type == cmp::Msg::Bye && got >= static_cast<int>(sizeof(cmp::Bye))) {
+		cmp::Bye bye{};
+		std::memcpy(&bye, buf, sizeof(bye));
+		in.byes.push_back(bye);
+	} else if (type == cmp::Msg::AppearanceChunk) {
+		std::vector<std::uint8_t> blob;
+		if (cmp::assemble_blob_chunk(
+				in.appearAsm,
+				std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t*>(buf), static_cast<std::size_t>(got)),
+				blob)
+			== cmp::AssembleStatus::Complete) {
+			in.appearance = std::move(blob);
+			in.haveAppearance = true;
+		}
+	} else if (type == cmp::Msg::InventoryChunk) {
+		std::vector<std::uint8_t> blob;
+		if (cmp::assemble_blob_chunk(
+				in.invAsm,
+				std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t*>(buf), static_cast<std::size_t>(got)),
+				blob)
+			== cmp::AssembleStatus::Complete) {
+			in.inventory = std::move(blob);
+			in.haveInventory = true;
+		}
+	}
+}
+
 void pump(UdpClient& c, Inbox& in, int n)
 {
 	for (int i = 0; i < n; ++i) {
+		std::vector<std::uint8_t> frame;
+		const int gotTcp = cmp::tcp_recv_append(c.tcp, c.tcpRecv);
+		(void)gotTcp;
+		while (cmp::tcp_try_extract_frame(c.tcpRecv, frame)) {
+			ingest(in, reinterpret_cast<const char*>(frame.data()), static_cast<int>(frame.size()));
+		}
+		if (in.haveWelcome && in.welcome.udpToken != 0
+			&& (c.udpToken == 0 || c.udpToken != in.welcome.udpToken || c.peerId != in.welcome.peerId)) {
+			c.peerId = in.welcome.peerId;
+			c.udpToken = in.welcome.udpToken;
+			const auto bind = cmp::make_udp_bind(c.peerId, c.udpToken);
+			c.send_udp(&bind, sizeof(bind));
+		}
 		char buf[512]{};
-		const int got = c.recv(buf, sizeof(buf));
-		if (got < static_cast<int>(sizeof(cmp::Header))) {
-			continue;
-		}
-		cmp::Header header{};
-		std::memcpy(&header, buf, sizeof(header));
-		if (!cmp::header_ok(header, static_cast<std::size_t>(got))) {
-			continue;
-		}
-		const auto type = static_cast<cmp::Msg>(header.type);
-		if (type == cmp::Msg::Welcome && got >= static_cast<int>(sizeof(cmp::Welcome))) {
-			std::memcpy(&in.welcome, buf, sizeof(in.welcome));
-			in.haveWelcome = true;
-		} else if (type == cmp::Msg::WorldSnapshot && got >= static_cast<int>(sizeof(cmp::WorldSnapshot))) {
-			std::memcpy(&in.snap, buf, sizeof(in.snap));
-			in.haveSnap = true;
-		} else if (type == cmp::Msg::Reject && got >= static_cast<int>(sizeof(cmp::Reject))) {
-			std::memcpy(&in.reject, buf, sizeof(in.reject));
-			in.haveReject = true;
-		} else if (type == cmp::Msg::SessionInfo && got >= static_cast<int>(sizeof(cmp::SessionInfo))) {
-			std::memcpy(&in.session, buf, sizeof(in.session));
-			in.haveSession = true;
-		} else if (type == cmp::Msg::PlayerPose && got >= static_cast<int>(sizeof(cmp::PlayerPose))) {
-			cmp::PlayerPose pose{};
-			std::memcpy(&pose, buf, sizeof(pose));
-			in.poses.push_back(pose);
-		} else if (type == cmp::Msg::ActorPose && got >= static_cast<int>(sizeof(cmp::ActorPose))) {
-			cmp::ActorPose pose{};
-			std::memcpy(&pose, buf, sizeof(pose));
-			in.actors.push_back(pose);
-		} else if (type == cmp::Msg::Hit && got >= static_cast<int>(sizeof(cmp::Hit))) {
-			cmp::Hit hit{};
-			std::memcpy(&hit, buf, sizeof(hit));
-			in.hits.push_back(hit);
-		} else if (type == cmp::Msg::Bye && got >= static_cast<int>(sizeof(cmp::Bye))) {
-			cmp::Bye bye{};
-			std::memcpy(&bye, buf, sizeof(bye));
-			in.byes.push_back(bye);
-		} else if (type == cmp::Msg::AppearanceChunk) {
-			std::vector<std::uint8_t> blob;
-			if (cmp::assemble_blob_chunk(
-					in.appearAsm,
-					std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t*>(buf), static_cast<std::size_t>(got)),
-					blob)
-				== cmp::AssembleStatus::Complete) {
-				in.appearance = std::move(blob);
-				in.haveAppearance = true;
-			}
-		} else if (type == cmp::Msg::InventoryChunk) {
-			std::vector<std::uint8_t> blob;
-			if (cmp::assemble_blob_chunk(
-					in.invAsm,
-					std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t*>(buf), static_cast<std::size_t>(got)),
-					blob)
-				== cmp::AssembleStatus::Complete) {
-				in.inventory = std::move(blob);
-				in.haveInventory = true;
-			}
+		sockaddr_in from{};
+		CmpSockLen fromLen = sizeof(from);
+		const int got = recvfrom(c.udp, buf, sizeof(buf), 0, reinterpret_cast<sockaddr*>(&from), &fromLen);
+		if (got >= static_cast<int>(sizeof(cmp::Header))) {
+			ingest(in, buf, got);
 		}
 	}
 }
@@ -180,7 +248,23 @@ void wait_for(UdpClient& c, Inbox& in, bool Inbox::* flag, int spins = 25)
 {
 	for (int i = 0; i < spins && !(in.*flag); ++i) {
 		pump(c, in, 8);
+		std::this_thread::sleep_for(std::chrono::milliseconds(20));
 	}
+}
+
+bool client_join(UdpClient& c, const cmp::Hello& hello, Inbox& in, int spins = 40)
+{
+	if (!c.send_tcp(&hello, sizeof(hello))) {
+		return false;
+	}
+	wait_for(c, in, &Inbox::haveWelcome, spins);
+	if (!in.haveWelcome) {
+		return false;
+	}
+	c.peerId = in.welcome.peerId;
+	c.udpToken = in.welcome.udpToken;
+	const auto bind = cmp::make_udp_bind(c.peerId, c.udpToken);
+	return c.send_udp(&bind, sizeof(bind));
 }
 
 cmp::Hello hello_ok(const char* name, const char* key)
@@ -576,87 +660,6 @@ int case_junk_and_unknown(const Options& opt)
 	return 0;
 }
 
-int case_fake_off_at_two(const Options& opt)
-{
-	UdpClient a;
-	UdpClient b;
-	CHECK(a.open(opt.host.c_str(), opt.port));
-	CHECK(b.open(opt.host.c_str(), opt.port));
-	const auto ha = hello_ok("A", "fake-a");
-	CHECK(a.send(&ha, sizeof(ha)));
-	Inbox ia;
-	wait_for(a, ia, &Inbox::haveWelcome);
-	CHECK(ia.haveWelcome);
-	CHECK(ia.welcome.fakePeerId == cmp::kFakePeerId);
-
-	const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-	bool sawFake = false;
-	while (std::chrono::steady_clock::now() < deadline && !sawFake) {
-		pump(a, ia, 8);
-		for (const auto& p : ia.poses) {
-			if (p.peerId == cmp::kFakePeerId) {
-				sawFake = true;
-			}
-		}
-	}
-	CHECK(sawFake);
-
-	const auto hb = hello_ok("B", "fake-b");
-	CHECK(b.send(&hb, sizeof(hb)));
-	Inbox ib;
-	wait_for(b, ib, &Inbox::haveWelcome);
-	CHECK(ib.haveWelcome);
-
-	bool sawBye = false;
-	const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-	while (std::chrono::steady_clock::now() < until && !sawBye) {
-		pump(a, ia, 8);
-		for (const auto& bye : ia.byes) {
-			if (bye.peerId == cmp::kFakePeerId) {
-				sawBye = true;
-			}
-		}
-	}
-	CHECK(sawBye);
-	a.close();
-	b.close();
-	return 0;
-}
-
-int case_fake_count(const Options& opt)
-{
-	UdpClient a;
-	CHECK(a.open(opt.host.c_str(), opt.port));
-	const auto ha = hello_ok("A", "fake-count-a");
-	CHECK(a.send(&ha, sizeof(ha)));
-	Inbox ia;
-	wait_for(a, ia, &Inbox::haveWelcome);
-	CHECK(ia.haveWelcome);
-	CHECK(ia.welcome.fakePeerId == cmp::kFakePeerId);
-
-	const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-	std::uint32_t seen = 0;
-	while (std::chrono::steady_clock::now() < deadline && seen != 0x7u) {
-		pump(a, ia, 16);
-		for (const auto& p : ia.poses) {
-			if (cmp::is_fake_peer(p.peerId)) {
-				seen |= 1u << (p.peerId - cmp::kFakePeerBegin);
-			}
-		}
-	}
-	CHECK((seen & 0x7u) == 0x7u);
-	bool sawDrawn = false;
-	for (const auto& p : ia.poses) {
-		if (p.peerId == cmp::kFakePeerId && cmp::has_pose_flag(p.flags, cmp::PoseFlag::Drawn)) {
-			sawDrawn = true;
-			break;
-		}
-	}
-	CHECK(sawDrawn);
-	a.close();
-	return 0;
-}
-
 int case_actor_pose_host_only(const Options& opt)
 {
 	UdpClient host;
@@ -750,17 +753,17 @@ int case_hit_relay(const Options& opt)
 	CHECK(guestSaw);
 
 	ih.hits.clear();
-	const auto toFake = cmp::make_hit(ig.welcome.peerId, cmp::kFakePeerId, 40.0f);
-	CHECK(guest.send(&toFake, sizeof(toFake)));
+	const auto toMissing = cmp::make_hit(ig.welcome.peerId, 999u, 40.0f);
+	CHECK(guest.send(&toMissing, sizeof(toMissing)));
 	std::this_thread::sleep_for(std::chrono::milliseconds(200));
 	pump(host, ih, 16);
-	bool hostSawFake = false;
+	bool hostSawMissing = false;
 	for (const auto& h : ih.hits) {
-		if (h.targetPeerId == cmp::kFakePeerId) {
-			hostSawFake = true;
+		if (h.targetPeerId == 999u) {
+			hostSawMissing = true;
 		}
 	}
-	CHECK(!hostSawFake);
+	CHECK(!hostSawMissing);
 
 	ig.hits.clear();
 	const auto spoof = cmp::make_hit(ih.welcome.peerId, ig.welcome.peerId, 99.0f);
@@ -1359,10 +1362,6 @@ int main(int argc, char** argv)
 		case_persist_files(opt);
 	} else if (opt.which == "host_handoff") {
 		case_host_handoff(opt);
-	} else if (opt.which == "fake_off_at_two") {
-		case_fake_off_at_two(opt);
-	} else if (opt.which == "fake_count") {
-		case_fake_count(opt);
 	} else if (opt.which == "actor_pose_host_only") {
 		case_actor_pose_host_only(opt);
 	} else if (opt.which == "hit_relay") {

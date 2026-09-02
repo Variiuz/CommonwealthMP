@@ -11,8 +11,6 @@ struct ServerConfig {
 	std::string name{ "CommonwealthMP" };
 	std::string motd;
 	std::uint16_t port{ cmp::kDefaultPort };
-	bool fake{ true };
-	int fakeCount{ 1 };
 	int maxPlayers{ 8 };
 	bool verbose{ false };
 	bool quiet{ false };
@@ -80,8 +78,6 @@ inline bool write_default_server_ini(const std::string& path)
 		<< "name=CommonwealthMP\n"
 		<< "motd=\n"
 		<< "port=7777\n"
-		<< "fake=1\n"
-		<< "fake_count=1\n"
 		<< "max_players=8\n"
 		<< "interest_uu=20000\n"
 		<< "pvp=1\n"
@@ -122,13 +118,6 @@ inline bool load_server_ini(const std::string& path, ServerConfig& cfg)
 				cfg.port = static_cast<std::uint16_t>(std::stoi(val));
 			} catch (...) {
 			}
-		} else if (key == "fake") {
-			cfg.fake = parse_bool_ini(val, cfg.fake);
-		} else if (key == "fake_count") {
-			try {
-				cfg.fakeCount = cmp::clamp_fake_count(std::stoi(val));
-			} catch (...) {
-			}
 		} else if (key == "max_players") {
 			try {
 				cfg.maxPlayers = std::stoi(val);
@@ -160,7 +149,6 @@ inline bool load_server_ini(const std::string& path, ServerConfig& cfg)
 	if (cfg.maxPlayers < 1) {
 		cfg.maxPlayers = 1;
 	}
-	cfg.fakeCount = cmp::clamp_fake_count(cfg.fakeCount);
 	if (cfg.interestUu < 0.0f) {
 		cfg.interestUu = 0.0f;
 	}

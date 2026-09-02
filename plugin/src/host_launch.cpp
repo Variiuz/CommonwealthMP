@@ -58,7 +58,7 @@ std::vector<std::string> ServerExeCandidates()
 	const std::string dir = PluginDir();
 	if (!dir.empty()) {
 		out.push_back((fs::path(dir) / "CommonwealthMP.Server.exe").string());
-		out.push_back((fs::path(dir) / "CommonwealthMP.Server-0.6.8.exe").string());
+		out.push_back((fs::path(dir) / "CommonwealthMP.Server-0.7.0.exe").string());
 		const fs::path repoServer = fs::path(dir).parent_path().parent_path().parent_path() / "dist" / "server";
 		std::error_code ec;
 		if (fs::is_directory(repoServer, ec)) {

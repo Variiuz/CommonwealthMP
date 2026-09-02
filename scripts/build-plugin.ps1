@@ -47,10 +47,6 @@ function Get-PluginInputFiles([string]$RepoRoot) {
 				Where-Object { $_.Extension -match '\.(cpp|h|hpp)$' }
 		)
 	}
-	$xmakeLua = Join-Path $RepoRoot "plugin\xmake.lua"
-	if (Test-Path -LiteralPath $xmakeLua) {
-		$files += Get-Item -LiteralPath $xmakeLua
-	}
 	$protocol = Join-Path $RepoRoot "protocol"
 	if (Test-Path -LiteralPath $protocol) {
 		$files += @(

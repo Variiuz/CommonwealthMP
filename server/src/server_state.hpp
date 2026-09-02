@@ -9,8 +9,8 @@
 #include <vector>
 
 #include "cmp_blobs.hpp"
+#include "cmp_net.hpp"
 #include "cmp_protocol.hpp"
-#include "cmp_reliable.hpp"
 #include "cmp_udp.hpp"
 #include "cmp_util.hpp"
 #include "config.hpp"
@@ -18,11 +18,11 @@
 
 constexpr int kMaxDatagram = 512;
 constexpr double kClientTimeoutSec = 8.0;
-constexpr int kFakeHz = 20;
+constexpr double kPendingTcpTimeoutSec = 10.0;
 constexpr double kPersistIntervalSec = 2.0;
 constexpr double kStatusBarIntervalSec = 1.0;
 constexpr double kStatusLogIntervalSec = 30.0;
-constexpr const char* kServerVersion = "0.6.8";  // x-release-please-version
+constexpr const char* kServerVersion = "0.7.0";  // x-release-please-version
 
 namespace fs = std::filesystem;
 
@@ -40,7 +40,11 @@ struct PlayerRec {
 };
 
 struct Client {
-	sockaddr_in addr{};
+	std::uint64_t connId = 0;
+	sockaddr_in tcpAddr{};
+	sockaddr_in udpAddr{};
+	bool udpBound = false;
+	std::uint32_t udpToken = 0;
 	std::uint32_t peerId = 0;
 	std::string playerKey;
 	std::string name;
@@ -50,7 +54,12 @@ struct Client {
 	bool havePose = false;
 	std::vector<std::uint8_t> appearance;
 	std::vector<std::uint8_t> inventory;
-	cmp::ReliableChannel reliable;
+};
+
+struct PendingTcp {
+	std::uint64_t connId = 0;
+	sockaddr_in addr{};
+	double connectedAt = 0.0;
 };
 
 struct SessionWorld {
@@ -79,13 +88,6 @@ struct ProcStats {
 #endif
 };
 
-struct FakeTickState {
-	double lastFake = 0.0;
-	double angle = 0.0;
-	int tick = 0;
-	int poseLog = 0;
-};
-
 extern std::atomic<bool> g_running;
 extern fs::path g_sessionDir;
 
@@ -101,20 +103,17 @@ void persist_world(const SessionWorld& world);
 void persist_player(const PlayerRec& rec);
 void load_world(SessionWorld& world, std::unordered_map<std::string, PlayerRec>& players);
 void flush_dirty(SessionWorld& world, bool& worldDirty, std::unordered_map<std::string, PlayerRec>& players, std::unordered_set<std::string>& dirtyPlayers);
-void reject_to(CmpSocket sock, const sockaddr_in& dest, cmp::RejectReason reason, const char* text);
 void print_usage();
 void print_banner();
 void backup_session_folder();
 void log_json_event(bool enabled, const std::string& json);
 std::uint32_t build_session_flags(const ServerConfig& cfg);
-void broadcast_session_rules(CmpSocket sock, const std::unordered_map<std::string, Client>& clients, std::uint32_t sessionFlags);
 void load_bans(std::unordered_set<std::string>& bans);
 void persist_bans(const std::unordered_set<std::string>& bans);
 bool in_interest(const Client& a, const Client& b, float maxUu);
 void sample_proc_stats(ProcStats& stats);
-Client* find_host(std::unordered_map<std::string, Client>& clients, SessionWorld& world);
+Client* find_host(std::unordered_map<std::uint32_t, Client>& clients, SessionWorld& world);
 bool take_blob(cmp::BlobAssembly& assembly, const char* buf, int n, std::vector<std::uint8_t>& out);
 std::string lower_copy(std::string s);
 std::vector<std::string> split_words(const std::string& line);
-void send_bye_fakes(CmpSocket sock, std::unordered_map<std::string, Client>& clients, int count);
 std::uint32_t alloc_peer(std::uint32_t& nextPeer);

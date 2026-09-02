@@ -23,9 +23,4 @@ bool CMP_PlayerInCommonwealth();
 void CMP_EnsureCommonwealthExterior();
 
 float CMP_EffectiveInterpDelayMs();
-void CMP_Reliable_Reset();
-void CMP_Reliable_Send(const void* data, int len);
-void CMP_Reliable_Tick();
-bool CMP_Reliable_HandleAck(const cmp::Ack& ack);
-bool CMP_Reliable_AlreadyHandled(std::uint16_t seq);
-void CMP_Reliable_MaybeAck(const cmp::Header& header);
+void CMP_Net_Send(const void* data, int len);

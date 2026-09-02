@@ -19,21 +19,26 @@ void CMP_QueryStart(std::string host, std::uint16_t port)
 	if (s.net.joined) {
 		CMP_Leave();
 	} else {
-		cmp_udp_shutdown();
+		cmp_net_shutdown();
 	}
 	g_queryPending = false;
 	g_queryResult = {};
 	s.settings.host = std::move(host);
 	s.settings.port = port;
-	if (!cmp_udp_startup()) {
-		g_queryResult.error = "udp startup failed";
+	if (!cmp_net_startup()) {
+		g_queryResult.error = "net startup failed";
 		g_queryResult.ok = false;
 		return;
 	}
+	if (!cmp_net_tcp_connect(s.settings.host.c_str(), s.settings.port)) {
+		g_queryResult.error = "tcp connect failed (bad host?)";
+		cmp_net_shutdown();
+		return;
+	}
 	const auto q = cmp::make_session_query();
-	if (!cmp_udp_send(s.settings.host.c_str(), s.settings.port, &q, static_cast<int>(sizeof(q)))) {
-		g_queryResult.error = "send query failed (bad host?)";
-		cmp_udp_shutdown();
+	if (!cmp_net_tcp_send(&q, static_cast<int>(sizeof(q)))) {
+		g_queryResult.error = "send query failed";
+		cmp_net_shutdown();
 		return;
 	}
 	g_queryPending = true;
@@ -55,7 +60,7 @@ bool CMP_QueryPoll(SessionQueryResult& out)
 
 	for (int i = 0; i < 8; ++i) {
 		char buf[512]{};
-		const int n = cmp_udp_recv(buf, sizeof(buf));
+		const int n = cmp_net_tcp_recv_frame(buf, sizeof(buf));
 		if (n < static_cast<int>(sizeof(cmp::Header))) {
 			break;
 		}
@@ -69,7 +74,7 @@ bool CMP_QueryPoll(SessionQueryResult& out)
 			g_queryResult.info.serverName[sizeof(g_queryResult.info.serverName) - 1] = '\0';
 			g_queryResult.info.motd[sizeof(g_queryResult.info.motd) - 1] = '\0';
 			g_queryPending = false;
-			cmp_udp_shutdown();
+			cmp_net_shutdown();
 			if (!g_queryResult.info.haveHost) {
 				g_queryResult.ok = false;
 				g_queryResult.error = "no live host on that server";
@@ -102,7 +107,7 @@ bool CMP_QueryPoll(SessionQueryResult& out)
 
 	if (cmp_net::NowSec() - g_queryStart > 2.0) {
 		g_queryPending = false;
-		cmp_udp_shutdown();
+		cmp_net_shutdown();
 		g_queryResult.ok = false;
 		g_queryResult.error = "server timeout (need matching protocol server)";
 		out = g_queryResult;

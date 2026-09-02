@@ -109,7 +109,7 @@ std::string CMP_ProbeSteamLobby()
 	out += hit;
 	out += ". CreateLobby is NOT invoked from this probe (FO4 2015 vtable is unproven; FO4 is not a Steam MP title). ";
 	out += "If you later call CreateLobby, log LobbyCreated_t.m_eResult. On OK: SetLobbyGameServer(ip, port, nil). ";
-	out += "Gameplay stays on UDP to CommonwealthMP.Server.exe.";
+	out += "Gameplay stays on TCP+UDP to CommonwealthMP.Server.exe.";
 	REX::INFO("{}", out);
 	return out;
 }

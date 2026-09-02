@@ -29,7 +29,7 @@ else()
 endif()
 
 function(cmp_server_case name port)
-	cmake_parse_arguments(ARG "FAKE" "EXTRA" "" ${ARGN})
+	cmake_parse_arguments(ARG "" "EXTRA" "" ${ARGN})
 	if(WIN32)
 		set(_args
 			-File ${CMAKE_SOURCE_DIR}/tests/run_server_case.ps1
@@ -38,9 +38,6 @@ function(cmp_server_case name port)
 			-Case ${name}
 			-Port ${port}
 		)
-		if(NOT ARG_FAKE)
-			list(APPEND _args -NoFake)
-		endif()
 		if(ARG_EXTRA)
 			list(APPEND _args -ExtraArgs "${ARG_EXTRA}")
 		endif()
@@ -53,9 +50,6 @@ function(cmp_server_case name port)
 			--case ${name}
 			--port ${port}
 		)
-		if(NOT ARG_FAKE)
-			list(APPEND _args --no-fake)
-		endif()
 		if(ARG_EXTRA)
 			list(APPEND _args --extra-args "${ARG_EXTRA}")
 		endif()
@@ -72,8 +66,6 @@ cmp_server_case(guest_meets_host 17787)
 cmp_server_case(two_clients_relay 17782)
 cmp_server_case(persist_files 17783)
 cmp_server_case(host_handoff 17784)
-cmp_server_case(fake_off_at_two 17785 FAKE)
-cmp_server_case(fake_count 17803 FAKE EXTRA "--fake-count 3")
 cmp_server_case(actor_pose_host_only 17804)
 cmp_server_case(hit_relay 17805)
 cmp_server_case(pvp_off_blocks_hit 17806 EXTRA "--no-pvp")

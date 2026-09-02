@@ -2,7 +2,7 @@
 includes("lib/commonlibf4")
 
 set_project("CommonwealthMP")
-set_version("0.6.8") -- x-release-please-version
+set_version("0.7.0") -- x-release-please-version
 set_license("GPL-3.0")
 set_languages("c++23")
 set_warnings("allextra")

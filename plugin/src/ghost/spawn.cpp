@@ -21,7 +21,6 @@ std::mutex g_cloneMutex;
 std::unordered_map<std::uint32_t, RE::TESNPC*> g_peerBases;
 std::unordered_set<std::uint32_t> g_cloneFormIds;
 std::unordered_set<std::uint32_t> g_ghostReady;
-std::unordered_set<std::uint32_t> g_dummyArmed;
 std::unordered_map<std::uint32_t, int> g_freezeTicks;
 std::unordered_map<std::uint32_t, double> g_lastMoveSec;
 bool g_cloneSourceFailed = false;
@@ -140,7 +139,6 @@ void DropPeerClone(std::uint32_t peerId)
 		g_peerBases.erase(it);
 	}
 	g_ghostReady.erase(peerId);
-	g_dummyArmed.erase(peerId);
 	g_freezeTicks.erase(peerId);
 	g_lastMoveSec.erase(peerId);
 	CMP_ResetGhostPuppet(peerId);
@@ -152,7 +150,6 @@ void ClearAllClones()
 	g_peerBases.clear();
 	g_cloneFormIds.clear();
 	g_ghostReady.clear();
-	g_dummyArmed.clear();
 	g_freezeTicks.clear();
 	g_lastMoveSec.clear();
 	g_cloneSourceFailed = false;
@@ -182,25 +179,6 @@ void EnsureGhost3D(RE::Actor* actor)
 	}
 }
 
-void MaybeEquipDummy(RE::Actor* actor, const cmp::PlayerPose& pose)
-{
-	if (!actor || !cmp::is_fake_peer(pose.peerId) || g_dummyArmed.contains(pose.peerId)) {
-		return;
-	}
-	if (actor->biped) {
-		for (int i = 0; i < static_cast<int>(RE::BIPED_OBJECT::kTotal); ++i) {
-			auto* form = actor->biped->object[i].parent.object;
-			if (form && form->As<RE::TESObjectWEAP>()) {
-				g_dummyArmed.insert(pose.peerId);
-				return;
-			}
-		}
-	}
-	CMP_EquipGhostFallbackWeapon(actor);
-	g_dummyArmed.insert(pose.peerId);
-	CMP_ResetGhostPuppet(pose.peerId);
-}
-
 void FinishGhostSetup(RE::Actor* actor, const cmp::PlayerPose& pose, const char* path)
 {
 	if (!actor) {
@@ -222,12 +200,8 @@ void FinishGhostSetup(RE::Actor* actor, const cmp::PlayerPose& pose, const char*
 	} else {
 		g_ghostReady.insert(pose.peerId);
 		FreezeGhost(actor, pose.peerId);
-		if (cmp::is_fake_peer(pose.peerId)) {
-			CMP_PaintGhostFromLocal(actor);
-		}
 		CMP_ApplyGhostAppearance(actor, pose.peerId);
 		CMP_ApplyGhostInventory(actor, pose.peerId);
-		MaybeEquipDummy(actor, pose);
 		CMP_ReapplyGhostPuppet(pose.peerId);
 		REX::INFO("Ghost {:08X} 3D ready via {}", actor->GetFormID(), path);
 	}
@@ -323,12 +297,8 @@ void MoveGhost(RE::Actor* actor, const cmp::PlayerPose& pose)
 	if (!g_ghostReady.contains(pose.peerId)) {
 		g_ghostReady.insert(pose.peerId);
 		FreezeGhost(actor, pose.peerId);
-		if (cmp::is_fake_peer(pose.peerId)) {
-			CMP_PaintGhostFromLocal(actor);
-		}
 		CMP_ApplyGhostAppearance(actor, pose.peerId);
 		CMP_ApplyGhostInventory(actor, pose.peerId);
-		MaybeEquipDummy(actor, pose);
 		REX::INFO("Ghost {:08X} 3D attached, applied look", actor->GetFormID());
 	} else {
 		FreezeGhost(actor, pose.peerId);

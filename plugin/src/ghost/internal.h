@@ -20,7 +20,6 @@ extern std::mutex g_cloneMutex;
 extern std::unordered_map<std::uint32_t, RE::TESNPC*> g_peerBases;
 extern std::unordered_set<std::uint32_t> g_cloneFormIds;
 extern std::unordered_set<std::uint32_t> g_ghostReady;
-extern std::unordered_set<std::uint32_t> g_dummyArmed;
 extern std::unordered_map<std::uint32_t, int> g_freezeTicks;
 extern std::unordered_map<std::uint32_t, double> g_lastMoveSec;
 extern bool g_cloneSourceFailed;
@@ -39,7 +38,6 @@ void DropPeerClone(std::uint32_t peerId);
 void ClearAllClones();
 
 void EnsureGhost3D(RE::Actor* actor);
-void MaybeEquipDummy(RE::Actor* actor, const cmp::PlayerPose& pose);
 void FinishGhostSetup(RE::Actor* actor, const cmp::PlayerPose& pose, const char* path);
 RE::Actor* SpawnGhostNative(const cmp::PlayerPose& pose);
 RE::Actor* SpawnGhost(const cmp::PlayerPose& pose);

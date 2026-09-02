@@ -5,20 +5,18 @@
 #include <string>
 #include <string_view>
 
-// UDP messages for CommonwealthMP.
+// TCP + UDP messages for CommonwealthMP.
+// TCP: control / reliable. UDP: poses and UdpBind.
 
 namespace cmp {
 
 inline constexpr char kMagic[4] = { 'C', 'M', 'P', '1' };
-inline constexpr std::uint8_t kProtocolVersion = 11;
-inline constexpr std::uint32_t kPluginVersion = 11;
+inline constexpr std::uint8_t kProtocolVersion = 12;
+inline constexpr std::uint32_t kPluginVersion = 12;
 inline constexpr std::uint16_t kDefaultPort = 7777;
-inline constexpr std::uint32_t kFakePeerId = 2;
-inline constexpr std::uint32_t kFakePeerBegin = 2;
-inline constexpr std::uint32_t kFakePeerEnd = 6;
-inline constexpr int kFakeCountMax = 5;
 inline constexpr std::uint32_t kCommonwealthWorldspace = 0x0000003C;
 inline constexpr std::size_t kMaxDatagram = 512;
+inline constexpr std::size_t kMaxTcpFrame = 65535;
 
 inline constexpr float kSanctuaryX = -79348.0f;
 inline constexpr float kSanctuaryY = 89752.0f;
@@ -45,8 +43,7 @@ enum class Msg : std::uint8_t {
 	Heartbeat = 15,
 	Teleport = 16,
 	SessionRules = 17,
-	Ack = 18,
-	NackChunk = 19
+	UdpBind = 18
 };
 
 enum class RejectReason : std::uint32_t {
@@ -69,10 +66,6 @@ inline constexpr std::uint32_t kSessionPasswordRequired = 1u << 1;
 inline constexpr float kGuestSpawnOffsetX = 80.0f;
 
 #pragma pack(push, 1)
-namespace HeaderFlag {
-	inline constexpr std::uint8_t Reliable = 1u << 0;
-}
-
 struct Header {
 	char magic[4];
 	std::uint8_t type;
@@ -110,6 +103,7 @@ struct Welcome {
 	std::uint8_t isNewPlayer;
 	std::uint8_t isHost;
 	std::uint32_t sessionFlags;
+	std::uint32_t udpToken;
 };
 
 struct SessionRules {
@@ -179,6 +173,7 @@ struct Kick {
 struct Heartbeat {
 	Header header;
 	std::uint32_t peerId;
+	std::uint32_t clientStampMs;
 };
 
 struct Teleport {
@@ -264,21 +259,10 @@ struct SessionInfo {
 	char motd[64];
 };
 
-struct Ack {
-	Header header;
-	std::uint16_t ackSeq;
-	std::uint16_t pad;
-	std::uint32_t peerId;
-};
-
-struct NackChunk {
+struct UdpBind {
 	Header header;
 	std::uint32_t peerId;
-	std::uint8_t blobType;
-	std::uint8_t pad;
-	std::uint16_t chunkIndex;
-	std::uint16_t chunkCount;
-	std::uint16_t blobBytes;
+	std::uint32_t udpToken;
 };
 #pragma pack(pop)
 
@@ -287,14 +271,14 @@ using InventoryChunk = BlobChunk;
 
 static_assert(sizeof(Header) == 12);
 static_assert(sizeof(Hello) == 135);
-static_assert(sizeof(Welcome) == 26);
+static_assert(sizeof(Welcome) == 30);
 static_assert(sizeof(SessionRules) == 16);
 static_assert(sizeof(PlayerPose) == 56);
 static_assert(sizeof(Bye) == 16);
 static_assert(sizeof(Hit) == 28);
 static_assert(sizeof(Chat) == 96);
 static_assert(sizeof(Kick) == 96);
-static_assert(sizeof(Heartbeat) == 16);
+static_assert(sizeof(Heartbeat) == 20);
 static_assert(sizeof(Teleport) == 32);
 static_assert(sizeof(ActorPose) == 64);
 static_assert(sizeof(Reject) == 112);
@@ -302,8 +286,7 @@ static_assert(sizeof(WorldSnapshot) == 64);
 static_assert(sizeof(BlobChunk) == 24);
 static_assert(sizeof(SessionQuery) == 20);
 static_assert(sizeof(SessionInfo) == 142);
-static_assert(sizeof(Ack) == 20);
-static_assert(sizeof(NackChunk) == 24);
+static_assert(sizeof(UdpBind) == 20);
 
 inline constexpr std::size_t kBlobPayloadMax = kMaxDatagram - sizeof(BlobChunk);
 
@@ -319,25 +302,21 @@ void fill_header(T& msg, Msg type)
 	msg.header.reserved = 0;
 }
 
-inline bool msg_is_reliable(Msg type)
+inline bool msg_is_udp(Msg type)
 {
 	switch (type) {
-	case Msg::Welcome:
-	case Msg::Reject:
-	case Msg::WorldSnapshot:
-	case Msg::AppearanceChunk:
-	case Msg::InventoryChunk:
-	case Msg::Chat:
-	case Msg::Kick:
-	case Msg::Teleport:
-	case Msg::SessionRules:
-	case Msg::Bye:
-	case Msg::NackChunk:
-	case Msg::Hit:
+	case Msg::PlayerPose:
+	case Msg::ActorPose:
+	case Msg::UdpBind:
 		return true;
 	default:
 		return false;
 	}
+}
+
+inline bool msg_is_tcp(Msg type)
+{
+	return !msg_is_udp(type);
 }
 
 inline bool expected_msg_size(Msg type, std::uint16_t size)
@@ -376,10 +355,8 @@ inline bool expected_msg_size(Msg type, std::uint16_t size)
 		return size == sizeof(Teleport);
 	case Msg::SessionRules:
 		return size == sizeof(SessionRules);
-	case Msg::Ack:
-		return size == sizeof(Ack);
-	case Msg::NackChunk:
-		return size == sizeof(NackChunk);
+	case Msg::UdpBind:
+		return size == sizeof(UdpBind);
 	default:
 		return false;
 	}
@@ -407,22 +384,6 @@ inline void copy_cstr(char* dest, std::size_t destSize, std::string_view src)
 	dest[n] = '\0';
 }
 
-inline bool is_fake_peer(std::uint32_t peerId)
-{
-	return peerId >= kFakePeerBegin && peerId <= kFakePeerEnd;
-}
-
-inline int clamp_fake_count(int n)
-{
-	if (n < 1) {
-		return 1;
-	}
-	if (n > kFakeCountMax) {
-		return kFakeCountMax;
-	}
-	return n;
-}
-
 inline float clamp_hit_damage(float damage)
 {
 	if (!(damage > 0.0f)) {
@@ -434,10 +395,9 @@ inline float clamp_hit_damage(float damage)
 	return damage;
 }
 
-inline constexpr int kFakeAnimStepCount = 8;
-inline constexpr int kFakeAnimStepTicks = 40; // 2s at 20 Hz
+inline constexpr int kPoseAnimStepCount = 8;
 
-inline std::uint32_t fake_anim_flags(int tick, int dummyIndex = 0)
+inline std::uint32_t pose_anim_flags(int step)
 {
 	static constexpr std::uint32_t kSteps[] = {
 		PoseFlag::Drawn,
@@ -449,23 +409,19 @@ inline std::uint32_t fake_anim_flags(int tick, int dummyIndex = 0)
 		PoseFlag::Sprint,
 		0,
 	};
-	static_assert(static_cast<int>(sizeof(kSteps) / sizeof(kSteps[0])) == kFakeAnimStepCount);
-	if (tick < 0) {
-		tick = 0;
+	static_assert(static_cast<int>(sizeof(kSteps) / sizeof(kSteps[0])) == kPoseAnimStepCount);
+	if (step < 0) {
+		step = 0;
 	}
-	if (dummyIndex < 0) {
-		dummyIndex = 0;
-	}
-	const int step = ((tick / kFakeAnimStepTicks) + dummyIndex) % kFakeAnimStepCount;
-	return kSteps[step];
+	return kSteps[step % kPoseAnimStepCount];
 }
 
-inline bool fake_anim_holds_still(std::uint32_t flags)
+inline bool pose_anim_holds_still(std::uint32_t flags)
 {
 	return has_pose_flag(flags, PoseFlag::Drawn) || has_pose_flag(flags, PoseFlag::Jumping);
 }
 
-inline const char* fake_anim_name(std::uint32_t flags)
+inline const char* pose_anim_name(std::uint32_t flags)
 {
 	if (has_pose_flag(flags, PoseFlag::Attacking)) {
 		return "fire";
@@ -548,7 +504,8 @@ inline Welcome make_welcome(
 	std::uint32_t fakePeerId,
 	bool isNewPlayer,
 	bool isHost,
-	std::uint32_t sessionFlags = 0)
+	std::uint32_t sessionFlags = 0,
+	std::uint32_t udpToken = 0)
 {
 	Welcome msg{};
 	fill_header(msg, Msg::Welcome);
@@ -557,6 +514,7 @@ inline Welcome make_welcome(
 	msg.isNewPlayer = isNewPlayer ? 1 : 0;
 	msg.isHost = isHost ? 1 : 0;
 	msg.sessionFlags = sessionFlags;
+	msg.udpToken = udpToken;
 	return msg;
 }
 
@@ -669,11 +627,21 @@ inline Kick make_kick(std::uint32_t targetPeerId, std::string_view reason)
 	return msg;
 }
 
-inline Heartbeat make_heartbeat(std::uint32_t peerId)
+inline Heartbeat make_heartbeat(std::uint32_t peerId, std::uint32_t clientStampMs = 0)
 {
 	Heartbeat msg{};
 	fill_header(msg, Msg::Heartbeat);
 	msg.peerId = peerId;
+	msg.clientStampMs = clientStampMs;
+	return msg;
+}
+
+inline UdpBind make_udp_bind(std::uint32_t peerId, std::uint32_t udpToken)
+{
+	UdpBind msg{};
+	fill_header(msg, Msg::UdpBind);
+	msg.peerId = peerId;
+	msg.udpToken = udpToken;
 	return msg;
 }
 
@@ -770,32 +738,6 @@ inline SessionInfo make_session_info(
 	return msg;
 }
 
-inline Ack make_ack(std::uint16_t ackSeq, std::uint32_t peerId = 0)
-{
-	Ack msg{};
-	fill_header(msg, Msg::Ack);
-	msg.ackSeq = ackSeq;
-	msg.peerId = peerId;
-	return msg;
-}
-
-inline NackChunk make_nack_chunk(
-	std::uint32_t peerId,
-	Msg blobType,
-	std::uint16_t chunkIndex,
-	std::uint16_t chunkCount,
-	std::uint16_t blobBytes)
-{
-	NackChunk msg{};
-	fill_header(msg, Msg::NackChunk);
-	msg.peerId = peerId;
-	msg.blobType = static_cast<std::uint8_t>(blobType);
-	msg.chunkIndex = chunkIndex;
-	msg.chunkCount = chunkCount;
-	msg.blobBytes = blobBytes;
-	return msg;
-}
-
 inline const char* reject_name(RejectReason reason)
 {
 	switch (reason) {
@@ -859,10 +801,8 @@ inline std::string_view msg_name(Msg type)
 		return "Teleport";
 	case Msg::SessionRules:
 		return "SessionRules";
-	case Msg::Ack:
-		return "Ack";
-	case Msg::NackChunk:
-		return "NackChunk";
+	case Msg::UdpBind:
+		return "UdpBind";
 	}
 	return "Unknown";
 }

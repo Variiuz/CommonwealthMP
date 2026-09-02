@@ -7,32 +7,6 @@
 #include <chrono>
 #include <vector>
 
-namespace {
-
-void PaintDummyGhostsFromLocal()
-{
-	std::vector<RE::ObjectRefHandle> handles;
-	{
-		auto& s = CMP_Session();
-		std::lock_guard lock(s.mutex);
-		for (const auto& [peer, handle] : s.ghosts.byPeer) {
-			if (!cmp::is_fake_peer(peer)) {
-				continue;
-			}
-			handles.push_back(handle);
-		}
-	}
-	for (const auto& handle : handles) {
-		const auto ptr = handle.get();
-		auto* actor = ptr ? ptr->As<RE::Actor>() : nullptr;
-		if (actor && actor->Get3D()) {
-			CMP_PaintGhostFromLocal(actor);
-		}
-	}
-}
-
-}  // namespace
-
 void CMP_EquipGhostFallbackWeapon(RE::Actor* actor)
 {
 	if (!actor) {
@@ -117,7 +91,6 @@ void CMP_SendAppearance(bool force)
 	using clock = std::chrono::steady_clock;
 	const double t = std::chrono::duration<double>(clock::now().time_since_epoch()).count();
 	const auto key = cmp_appearance::EquipKey(player);
-	const auto prevKey = s.blobs.lastEquipKey;
 	const bool first = s.blobs.lastAppearanceSend <= 0.0;
 	if (!force && !first && (t - s.blobs.lastAppearanceSend) < 2.0 && key == s.blobs.lastEquipKey) {
 		return;
@@ -130,9 +103,6 @@ void CMP_SendAppearance(bool force)
 		return;
 	}
 	cmp_appearance::SendChunks(cmp::Msg::AppearanceChunk, blob, s.net.myPeerId, s.settings.host.c_str(), s.settings.port);
-	if (force || first || key != prevKey) {
-		PaintDummyGhostsFromLocal();
-	}
 }
 
 void CMP_ApplyGhostAppearance(RE::Actor* actor, std::uint32_t peerId)

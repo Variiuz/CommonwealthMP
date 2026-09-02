@@ -22,6 +22,7 @@ tools/cmp-reporter/target/
 tools/cmp-reporter/dist/
 data/seed/*.fos
 data/dumps/*.txt
+research/fo4-anim/
 *.dmp
 dist/server/session/
 CK_Test.esp

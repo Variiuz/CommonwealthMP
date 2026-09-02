@@ -6,9 +6,10 @@ add_executable(CommonwealthMP.Server
 	src/main.cpp
 	src/session_persist.cpp
 	src/net_util.cpp
-	src/fake_peers.cpp
 	src/handlers.cpp
 	src/admin_cmds.cpp
+	src/net_io.cpp
+	src/persist_worker.cpp
 	${CMP_SERVER_RC}
 	${CMP_SERVER_GUI})
 cmp_link_udp(CommonwealthMP.Server)

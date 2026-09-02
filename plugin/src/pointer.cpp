@@ -81,16 +81,6 @@ bool CopyNearest(RemoteSnapshot& out)
 		if (peer == s.net.myPeerId) {
 			continue;
 		}
-			if (s.net.fakePeerId != 0 && peer == s.net.fakePeerId) {
-			best = &pose;
-			out.peer = peer;
-			break;
-		}
-		if (cmp::is_fake_peer(peer)) {
-			best = &pose;
-			out.peer = peer;
-			break;
-		}
 		if (!best) {
 			best = &pose;
 			out.peer = peer;
@@ -179,7 +169,7 @@ bool CMP_GotoNearest()
 {
 	RemoteSnapshot snap;
 	if (!CopyNearest(snap)) {
-		CMP_Print("cmp_goto: no remote pose (join first, wait for fake/friend)");
+		CMP_Print("cmp_goto: no remote pose (join first, wait for a friend)");
 		return false;
 	}
 

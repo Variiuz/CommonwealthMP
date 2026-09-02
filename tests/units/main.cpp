@@ -12,6 +12,7 @@
 
 #include "cmp_blobs.hpp"
 #include "cmp_json.hpp"
+#include "cmp_net.hpp"
 #include "cmp_protocol.hpp"
 #include "cmp_util.hpp"
 #include "config.hpp"
@@ -58,7 +59,7 @@ int test_protocol()
 	CHECK(hello.inWorld == 1);
 	CHECK(hello.flags == 0);
 	CHECK(sizeof(cmp::Hello) == 135);
-	CHECK(sizeof(cmp::Welcome) == 26);
+	CHECK(sizeof(cmp::Welcome) == 30);
 	CHECK(sizeof(cmp::SessionQuery) == 20);
 	CHECK(sizeof(cmp::SessionInfo) == 142);
 
@@ -146,18 +147,18 @@ int test_protocol()
 	CHECK(sizeof(cmp::Hit) == 28);
 	CHECK(sizeof(cmp::Chat) == 96);
 	CHECK(sizeof(cmp::Kick) == 96);
-	CHECK(sizeof(cmp::Heartbeat) == 16);
+	CHECK(sizeof(cmp::Heartbeat) == 20);
 	CHECK(sizeof(cmp::Teleport) == 32);
 	CHECK(cmp::msg_name(cmp::Msg::Teleport) == "Teleport");
-	CHECK(cmp::kProtocolVersion == 11);
-	CHECK(cmp::kPluginVersion == 11);
-	CHECK(sizeof(cmp::Ack) == 20);
-	CHECK(sizeof(cmp::NackChunk) == 24);
-	CHECK(cmp::msg_name(cmp::Msg::Ack) == "Ack");
-	CHECK(cmp::msg_name(cmp::Msg::NackChunk) == "NackChunk");
-	CHECK(cmp::msg_is_reliable(cmp::Msg::Chat));
-	CHECK(cmp::msg_is_reliable(cmp::Msg::Hit));
-	CHECK(!cmp::msg_is_reliable(cmp::Msg::PlayerPose));
+	CHECK(cmp::kProtocolVersion == 12);
+	CHECK(cmp::kPluginVersion == 12);
+	CHECK(sizeof(cmp::UdpBind) == 20);
+	CHECK(cmp::msg_name(cmp::Msg::UdpBind) == "UdpBind");
+	CHECK(cmp::msg_is_tcp(cmp::Msg::Chat));
+	CHECK(cmp::msg_is_tcp(cmp::Msg::Hit));
+	CHECK(cmp::msg_is_udp(cmp::Msg::PlayerPose));
+	CHECK(cmp::msg_is_udp(cmp::Msg::UdpBind));
+	CHECK(!cmp::msg_is_tcp(cmp::Msg::PlayerPose));
 	CHECK(cmp::clamp_hit_damage(-3.0f) == 0.0f);
 	CHECK(cmp::clamp_hit_damage(0.0f) == 0.0f);
 	CHECK(cmp::clamp_hit_damage(40.0f) == 40.0f);
@@ -179,27 +180,20 @@ int test_protocol()
 	CHECK(hit.damage == 40.5f);
 	CHECK(cmp::header_ok(hit.header, sizeof(hit)));
 	CHECK(cmp::has_pose_flag(cmp::PoseFlag::Dead, cmp::PoseFlag::Dead));
-	CHECK(cmp::is_fake_peer(cmp::kFakePeerId));
-	CHECK(cmp::is_fake_peer(6));
-	CHECK(!cmp::is_fake_peer(1));
-	CHECK(!cmp::is_fake_peer(7));
-	CHECK(cmp::clamp_fake_count(0) == 1);
-	CHECK(cmp::clamp_fake_count(3) == 3);
-	CHECK(cmp::clamp_fake_count(99) == cmp::kFakeCountMax);
-	CHECK(cmp::has_pose_flag(cmp::fake_anim_flags(0), cmp::PoseFlag::Drawn));
-	CHECK(cmp::has_pose_flag(cmp::fake_anim_flags(cmp::kFakeAnimStepTicks), cmp::PoseFlag::Sighted));
-	CHECK(cmp::has_pose_flag(cmp::fake_anim_flags(cmp::kFakeAnimStepTicks * 2), cmp::PoseFlag::Attacking));
-	CHECK(cmp::has_pose_flag(cmp::fake_anim_flags(cmp::kFakeAnimStepTicks * 3), cmp::PoseFlag::Reloading));
-	CHECK(cmp::has_pose_flag(cmp::fake_anim_flags(cmp::kFakeAnimStepTicks * 4), cmp::PoseFlag::Jumping));
-	CHECK(cmp::has_pose_flag(cmp::fake_anim_flags(cmp::kFakeAnimStepTicks * 5), cmp::PoseFlag::Sneak));
-	CHECK(cmp::has_pose_flag(cmp::fake_anim_flags(cmp::kFakeAnimStepTicks * 6), cmp::PoseFlag::Sprint));
-	CHECK(cmp::fake_anim_flags(cmp::kFakeAnimStepTicks * 7) == 0);
-	CHECK(cmp::fake_anim_holds_still(cmp::fake_anim_flags(0)));
-	CHECK(cmp::fake_anim_holds_still(cmp::fake_anim_flags(cmp::kFakeAnimStepTicks * 4)));
-	CHECK(!cmp::fake_anim_holds_still(cmp::fake_anim_flags(cmp::kFakeAnimStepTicks * 5)));
-	CHECK(!cmp::fake_anim_holds_still(0));
-	CHECK(std::string_view(cmp::fake_anim_name(cmp::PoseFlag::Drawn | cmp::PoseFlag::Attacking)) == "fire");
-	CHECK(std::string_view(cmp::fake_anim_name(0)) == "walk");
+	CHECK(cmp::has_pose_flag(cmp::pose_anim_flags(0), cmp::PoseFlag::Drawn));
+	CHECK(cmp::has_pose_flag(cmp::pose_anim_flags(1), cmp::PoseFlag::Sighted));
+	CHECK(cmp::has_pose_flag(cmp::pose_anim_flags(2), cmp::PoseFlag::Attacking));
+	CHECK(cmp::has_pose_flag(cmp::pose_anim_flags(3), cmp::PoseFlag::Reloading));
+	CHECK(cmp::has_pose_flag(cmp::pose_anim_flags(4), cmp::PoseFlag::Jumping));
+	CHECK(cmp::has_pose_flag(cmp::pose_anim_flags(5), cmp::PoseFlag::Sneak));
+	CHECK(cmp::has_pose_flag(cmp::pose_anim_flags(6), cmp::PoseFlag::Sprint));
+	CHECK(cmp::pose_anim_flags(7) == 0);
+	CHECK(cmp::pose_anim_holds_still(cmp::pose_anim_flags(0)));
+	CHECK(cmp::pose_anim_holds_still(cmp::pose_anim_flags(4)));
+	CHECK(!cmp::pose_anim_holds_still(cmp::pose_anim_flags(5)));
+	CHECK(!cmp::pose_anim_holds_still(0));
+	CHECK(std::string_view(cmp::pose_anim_name(cmp::PoseFlag::Drawn | cmp::PoseFlag::Attacking)) == "fire");
+	CHECK(std::string_view(cmp::pose_anim_name(0)) == "walk");
 	CHECK(cmp::msg_name(cmp::Msg::ActorPose) == "ActorPose");
 	const auto actorPose = cmp::make_actor_pose(0x1A4D7, 0x1A4D8, cmp::kCommonwealthWorldspace, 1, 2, 3, 0.5f, 0.1f, 40, 5, 6, cmp::PoseFlag::Drawn, true, false);
 	CHECK(actorPose.header.type == static_cast<std::uint8_t>(cmp::Msg::ActorPose));
@@ -251,9 +245,9 @@ int test_protocol()
 	bad.size = 200;
 	CHECK(!cmp::header_ok(bad, sizeof(hello)));
 
-	const auto welcome = cmp::make_welcome(7, cmp::kFakePeerId, true, true);
+	const auto welcome = cmp::make_welcome(7, 0, true, true);
 	CHECK(welcome.peerId == 7);
-	CHECK(welcome.fakePeerId == cmp::kFakePeerId);
+	CHECK(welcome.fakePeerId == 0);
 	CHECK(welcome.isNewPlayer == 1);
 	CHECK(welcome.isHost == 1);
 
@@ -671,8 +665,6 @@ int test_config()
 	CHECK(cfg.name == "CommonwealthMP");
 	CHECK(cfg.maxPlayers == 8);
 	CHECK(cfg.port == cmp::kDefaultPort);
-	CHECK(cfg.fake);
-	CHECK(cfg.fakeCount == 1);
 	CHECK(nearly(cfg.interestUu, 20000.0f, 0.1f));
 
 	{
@@ -683,8 +675,6 @@ int test_config()
 			<< "motd=hi\n"
 			<< "max_players=0\n"
 			<< "interest_uu=-5\n"
-			<< "fake=off\n"
-			<< "fake_count=3\n"
 			<< "port=notanumber\n"
 			<< "verbose=yes\n"
 			<< "pvp=off\n"
@@ -699,8 +689,6 @@ int test_config()
 	CHECK(loaded.motd == "hi");
 	CHECK(loaded.maxPlayers == 1);
 	CHECK(loaded.interestUu == 0.0f);
-	CHECK(!loaded.fake);
-	CHECK(loaded.fakeCount == 3);
 	CHECK(loaded.verbose);
 	CHECK(!loaded.pvp);
 	CHECK(loaded.password == "secret");
@@ -745,6 +733,28 @@ int test_sim()
 	return 0;
 }
 
+int test_tcp_send_queue()
+{
+	cmp::TcpSendQueue q;
+	CHECK(q.empty());
+	const char a[] = "hello";
+	const char b[] = "world!!";
+	CHECK(q.append(a, 5));
+	CHECK(q.append(b, 7));
+	CHECK(q.pending() == 12);
+	CHECK(!q.empty());
+	q.clear();
+	CHECK(q.empty());
+	std::vector<std::uint8_t> big(cmp::kTcpSendQueueMax, 0xAB);
+	CHECK(q.append(big.data(), static_cast<int>(big.size())));
+	CHECK(q.pending() == cmp::kTcpSendQueueMax);
+	CHECK(!q.append(a, 1));
+	q.clear();
+	CHECK(q.append(a, 5));
+	CHECK(!q.append(big.data(), static_cast<int>(big.size())));
+	return 0;
+}
+
 }  // namespace
 
 int main()
@@ -758,6 +768,7 @@ int main()
 	test_copy_and_json();
 	test_config();
 	test_sim();
+	test_tcp_send_queue();
 	if (g_fails) {
 		std::cerr << "cmp_units: " << g_fails << " failed / " << g_checks << " checks\n";
 		return 1;

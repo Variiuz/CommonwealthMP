@@ -18,7 +18,7 @@ void CMP_SendChat(const char* text)
 		return;
 	}
 	const auto chat = cmp::make_chat(s.net.myPeerId, text);
-	CMP_Reliable_Send(&chat, static_cast<int>(sizeof(chat)));
+	CMP_Net_Send(&chat, static_cast<int>(sizeof(chat)));
 }
 
 void CMP_SendKick(std::uint32_t targetPeerId, const char* reason)
@@ -28,7 +28,7 @@ void CMP_SendKick(std::uint32_t targetPeerId, const char* reason)
 		return;
 	}
 	const auto kick = cmp::make_kick(targetPeerId, reason ? reason : "");
-	CMP_Reliable_Send(&kick, static_cast<int>(sizeof(kick)));
+	CMP_Net_Send(&kick, static_cast<int>(sizeof(kick)));
 }
 
 void CMP_SendTeleport(std::uint32_t targetPeerId)
@@ -51,14 +51,14 @@ void CMP_SendTeleport(std::uint32_t targetPeerId)
 		}
 	}
 	const auto tp = cmp::make_teleport(targetPeerId, pos.x, pos.y, pos.z, location);
-	CMP_Reliable_Send(&tp, static_cast<int>(sizeof(tp)));
+	CMP_Net_Send(&tp, static_cast<int>(sizeof(tp)));
 }
 
 void CMP_SendLocalPose()
 {
 	CMP_CrashNote("pose");
 	auto& s = CMP_Session();
-	if (!s.net.joined) {
+	if (!s.net.joined || !s.net.udpBound) {
 		return;
 	}
 
@@ -80,9 +80,8 @@ void CMP_SendLocalPose()
 	s.presence.worldspace = world.location;
 	auto pose = cmp::make_pose(s.net.myPeerId, world.location, world.x, world.y, world.z, world.yaw);
 	CMP_FillLocalMotion(pose);
-	cmp_udp_send(s.settings.host.c_str(), s.settings.port, &pose, static_cast<int>(sizeof(pose)));
+	CMP_Net_Send(&pose, static_cast<int>(sizeof(pose)));
 	CMP_SendHostActors();
 	CMP_SendAppearance(false);
 	CMP_SendInventory(false);
-	CMP_Reliable_Tick();
 }

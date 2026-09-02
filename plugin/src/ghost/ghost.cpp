@@ -42,9 +42,7 @@ std::string GhostLabel(const cmp::PlayerPose& pose)
 	std::string label = "Player";
 	auto& s = CMP_Session();
 	std::lock_guard lock(s.mutex);
-	if (cmp::is_fake_peer(pose.peerId) || pose.peerId == s.net.fakePeerId) {
-		label = "Dummy";
-	} else if (auto it = s.ghosts.names.find(pose.peerId); it != s.ghosts.names.end() && !it->second.empty()) {
+	if (auto it = s.ghosts.names.find(pose.peerId); it != s.ghosts.names.end() && !it->second.empty()) {
 		label = it->second;
 	}
 	return label;
@@ -136,8 +134,8 @@ bool CMP_ForceAnim(int step, std::string& note)
 	if (step < 0) {
 		step = 0;
 	}
-	step %= cmp::kFakeAnimStepCount;
-	const auto flags = cmp::fake_anim_flags(step * cmp::kFakeAnimStepTicks, 0);
+	step %= cmp::kPoseAnimStepCount;
+	const auto flags = cmp::pose_anim_flags(step);
 
 	RE::Actor* actor = nullptr;
 	std::uint32_t peer = 0;
@@ -150,13 +148,9 @@ bool CMP_ForceAnim(int step, std::string& note)
 			if (!candidate || !candidate->Get3D()) {
 				continue;
 			}
-			if (peer == 0 || cmp::is_fake_peer(id)) {
-				actor = candidate;
-				peer = id;
-				if (cmp::is_fake_peer(id)) {
-					break;
-				}
-			}
+			actor = candidate;
+			peer = id;
+			break;
 		}
 	}
 
@@ -167,14 +161,14 @@ bool CMP_ForceAnim(int step, std::string& note)
 			return false;
 		}
 		peer = 0xFFFFFFFFu;
-		note = std::string("cmp_anim: no dummy (join with fake on), applying to you ") + cmp::fake_anim_name(flags);
+		note = std::string("cmp_anim: no remote ghost, applying to you ") + cmp::pose_anim_name(flags);
 	} else {
 		using clock = std::chrono::steady_clock;
 		std::lock_guard lock(s.mutex);
 		s.ghosts.animOverridePeer = peer;
 		s.ghosts.animOverrideFlags = flags;
 		s.ghosts.animOverrideUntil = std::chrono::duration<double>(clock::now().time_since_epoch()).count() + 4.0;
-		note = std::string("cmp_anim: peer ") + std::to_string(peer) + " " + cmp::fake_anim_name(flags) + " (4s)";
+		note = std::string("cmp_anim: peer ") + std::to_string(peer) + " " + cmp::pose_anim_name(flags) + " (4s)";
 	}
 
 	float pitch = 0.0f;

@@ -453,11 +453,11 @@ void CMP_RegisterConsole()
 	Steal("DumpNiUpdates", "cmp_status", "CommonwealthMP: print join/ghost status and HUD pointer", ExecStatus);
 	Steal("DumpModelMap", "cmp_leave", "CommonwealthMP: leave dedicated server", ExecLeave);
 	Steal("ToggleMaterialGeometry", "cmp_lobby", "CommonwealthMP: probe Steam CreateLobby (discovery only)", ExecLobby);
-	Steal("DumpConditionFunctions", "cmp_goto", "CommonwealthMP: warp to the fake/remote player", ExecGoto);
+	Steal("DumpConditionFunctions", "cmp_goto", "CommonwealthMP: warp to the nearest remote player", ExecGoto);
 	Steal("DumpPapyrusStacks", "cmp_probeforms", "CommonwealthMP: dump live TESForm types for ghost spawn", ExecProbe);
 	Steal("ToggleCollisionGeometry", "cmp_dump", "CommonwealthMP: write FormID/RVA/idle/cell dump for development", ExecDump);
 	Steal("ToggleActorMover", "cmp_query", "CommonwealthMP: query if a live Commonwealth host is on A.B.C.D Port", ExecQuery, g_joinParams, 5);
-	Steal("ToggleStairsGeometry", "cmp_anim", "CommonwealthMP: force dummy (or you) pose 0=draw 1=ads 2=fire 3=reload 4=jump 5=sneak 6=sprint 7=walk", ExecAnim, g_animParams, 1);
+	Steal("ToggleStairsGeometry", "cmp_anim", "CommonwealthMP: force remote (or you) pose 0=draw 1=ads 2=fire 3=reload 4=jump 5=sneak 6=sprint 7=walk", ExecAnim, g_animParams, 1);
 	Steal("TestLocalMap", "cmp_kick", "CommonwealthMP: host kick PEER", ExecKick, g_peerParams, 1);
 	Steal("TestUFOCam", "cmp_teleport", "CommonwealthMP: host teleport PEER to you", ExecTeleport, g_peerParams, 1);
 	Steal("ToggleTrees", "cmp_modhash", "CommonwealthMP: print loaded-mod fingerprint for join checks", ExecModHash);

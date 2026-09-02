@@ -42,23 +42,6 @@ void send_blob(CmpSocket sock, const sockaddr_in& dest, cmp::Msg type, std::uint
 	for (const auto& pkt : packets) send_to(sock, dest, pkt.data(), static_cast<int>(pkt.size()), what.c_str());
 }
 
-void reject_to(CmpSocket sock, const sockaddr_in& dest, cmp::RejectReason reason, const char* text)
-{
-	auto msg = cmp::make_reject(reason, text);
-	// Pre-join rejects have no Client reliable channel. Stamp as reliable and
-	// fire a few copies so the waiting client still sees the reason under loss.
-	static std::uint16_t rejectSeq = 1;
-	msg.header.seq = rejectSeq++;
-	if (rejectSeq == 0) {
-		rejectSeq = 1;
-	}
-	msg.header.flags = static_cast<std::uint8_t>(msg.header.flags | cmp::HeaderFlag::Reliable);
-	for (int i = 0; i < 3; ++i) {
-		send_to(sock, dest, &msg, sizeof(msg), "Reject");
-	}
-	LOG_INFO("tx Reject %s (%s) -> %s", cmp::reject_name(reason), text, addr_key(dest).c_str());
-}
-
 bool in_interest(const Client& a, const Client& b, float maxUu)
 {
 	return cmp::in_interest(a.lastPose, a.havePose, b.lastPose, b.havePose, maxUu);
@@ -85,23 +68,8 @@ std::vector<std::string> split_words(const std::string& line)
 	return out;
 }
 
-void send_bye_fakes(CmpSocket sock, std::unordered_map<std::string, Client>& clients, int count)
-{
-	const int n = cmp::clamp_fake_count(count);
-	for (int i = 0; i < n; ++i) {
-		const auto byeFake = cmp::make_bye(cmp::kFakePeerBegin + static_cast<std::uint32_t>(i));
-		for (auto& [_, client] : clients) {
-			auto packet = byeFake;
-			const auto seq = client.reliable.stamp(&packet, sizeof(packet));
-			client.reliable.track(seq, &packet, sizeof(packet), now_sec());
-			send_to(sock, client.addr, &packet, sizeof(packet), "ByeFake");
-		}
-	}
-}
-
 std::uint32_t alloc_peer(std::uint32_t& nextPeer)
 {
-	while (cmp::is_fake_peer(nextPeer)) ++nextPeer;
 	return nextPeer++;
 }
 
@@ -113,18 +81,12 @@ std::uint32_t build_session_flags(const ServerConfig& cfg)
 	return flags;
 }
 
-void broadcast_session_rules(CmpSocket sock, const std::unordered_map<std::string, Client>& clients, std::uint32_t sessionFlags)
-{
-	const auto rules = cmp::make_session_rules(sessionFlags);
-	for (const auto& [_, client] : clients) send_to(sock, client.addr, &rules, sizeof(rules), "SessionRules");
-}
-
 void log_json_event(bool enabled, const std::string& json)
 {
 	if (enabled) LOG_INFO("%s", json.c_str());
 }
 
-Client* find_host(std::unordered_map<std::string, Client>& clients, SessionWorld& world)
+Client* find_host(std::unordered_map<std::uint32_t, Client>& clients, SessionWorld& world)
 {
 	for (auto& [_, client] : clients) {
 		if (client.peerId == world.hostPeerId) return &client;
@@ -186,12 +148,9 @@ void print_usage()
 	LOG_INFO("  --config PATH       Config file (default exe_dir/server.ini)");
 	LOG_INFO("  --name TEXT         Server display name");
 	LOG_INFO("  --motd TEXT         Message of the day (SessionInfo)");
-	LOG_INFO("  --port N            UDP port (default 7777)");
+	LOG_INFO("  --port N            TCP+UDP port (default 7777)");
 	LOG_INFO("  --max-players N     Cap live clients (default 8)");
 	LOG_INFO("  --interest-uu N     Pose fan-out radius (0=off, default 20000)");
-	LOG_INFO("  --fake              Invent dummy players until 2 real clients (default)");
-	LOG_INFO("  --no-fake           Do not invent dummy players");
-	LOG_INFO("  --fake-count N      Dummy bodies while fake is on (1-5, default 1)");
 	LOG_INFO("  --reset-session     Clear session/ world and player records");
 	LOG_INFO("  --log-file PATH     Log file (default next to the exe)");
 	LOG_INFO("  --session-dir PATH  Session folder (default next to the exe / session)");
@@ -203,7 +162,7 @@ void print_usage()
 	LOG_INFO("  --password TEXT     Require password on Hello (max 15 chars)");
 	LOG_INFO("  --mod-hash HEX      Pin expected mod fingerprint (optional)");
 	LOG_INFO("  --ban KEY           Reject Hello from player key at startup");
-	LOG_INFO("Admin: help status players kick <peer|key> [ban] say TEXT save quit fake on|off|N maxplayers N reload motd TEXT pvp on|off password TEXT ban|unban|bans");
+	LOG_INFO("Admin: help status players kick <peer|key> [ban] say TEXT save quit maxplayers N reload motd TEXT pvp on|off password TEXT ban|unban|bans");
 }
 
 void print_banner()

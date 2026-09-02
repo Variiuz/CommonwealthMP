@@ -221,7 +221,7 @@ void CMP_SendHostActors()
 			flags,
 			true,
 			false);
-		cmp_udp_send(s.settings.host.c_str(), s.settings.port, &msg, static_cast<int>(sizeof(msg)));
+		CMP_Net_Send(&msg, static_cast<int>(sizeof(msg)));
 	}
 }
 

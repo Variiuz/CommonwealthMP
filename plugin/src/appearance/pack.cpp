@@ -235,7 +235,7 @@ void SendChunks(cmp::Msg type, const std::vector<std::uint8_t>& blob, std::uint3
 	(void)host;
 	(void)port;
 	for (const auto& pkt : packets) {
-		CMP_Reliable_Send(pkt.data(), static_cast<int>(pkt.size()));
+		CMP_Net_Send(pkt.data(), static_cast<int>(pkt.size()));
 	}
 }
 

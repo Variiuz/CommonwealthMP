@@ -105,11 +105,7 @@ std::vector<PeerIndicator> CollectPeers()
 				row.name = nit->second;
 			}
 			if (row.name.empty()) {
-				if (cmp::is_fake_peer(peer) || peer == s.net.fakePeerId) {
-					row.name = "Dummy";
-				} else {
-					row.name = "peer " + std::to_string(peer);
-				}
+				row.name = "peer " + std::to_string(peer);
 			}
 			auto git = s.ghosts.byPeer.find(peer);
 			if (git != s.ghosts.byPeer.end()) {
