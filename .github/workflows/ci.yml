@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 jobs:
-  server:
+  server-windows:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -19,8 +19,23 @@ jobs:
         run: ctest --test-dir build/server -C Release --output-on-failure
       - uses: actions/upload-artifact@v4
         with:
-          name: CommonwealthMP.Server
+          name: CommonwealthMP.Server-windows
           path: dist/server/CommonwealthMP.Server.exe
+
+  server-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -B build/server -S . -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build/server --parallel
+      - name: Test
+        run: ctest --test-dir build/server --output-on-failure
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CommonwealthMP.Server-linux
+          path: dist/server/CommonwealthMP.Server
 
   plugin:
     runs-on: windows-latest
