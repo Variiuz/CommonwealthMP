@@ -104,6 +104,10 @@ powershell -ExecutionPolicy Bypass -File scripts\pack-mo2.ps1 -Build -ForceRebui
 
 `-Build` compiles incrementally (or skips when the DLL is already fresh). `-ForceRebuild` forces a full plugin rebuild. Output: `dist/CommonwealthMP-<version>-mo2.zip`. See `mod/README.md`.
 
+## Disclaimer
+Work gets done much faster with AI & Agent assisted development, while some parts may contain ai generated code, I try my best to check at minimum the written code and at best write tests for them. Releases generally have human reviewed code 99%
+So yes, for people who really hate AI, you do not have to stay here and read or use this mod.
+
 ## License
 
 GPL-3.0-or-later with `EXCEPTIONS` (modding exception and linking exception).
