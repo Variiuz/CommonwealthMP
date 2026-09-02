@@ -1,40 +1,21 @@
 # CommonwealthMP
 
-Fallout 4 coop over a dedicated server.
+CommonwealthMP (short CMP) is a multiplayer mod for Fallout 4. It is early development and not yet reliably playable: open-source, free, not feature-complete. Focus is the dedicated server and F4SE plugin.
 
 ## Current State
+Currently it is "playable" in the streched sense: 2+ players can join a host world and see each other.
+Guests join by IP; they do not share a save; this means progress SHOULD only happen on the host. The plugin is not yet stable; crashes are expected. The server is a separate process and does not require Fallout 4. The UI is bad, I am not really familiar with swfs etc but i try my best. Main goal is animations, inventory, appareance, world sync.
 
-Phase 0: separate saves, ghost presence, host FO4 as the live map. Guests join by IP; they do not share a save. Target later: host-owned world.
+Wire protocol is **11**. 
 
-Two Steam clients can see each other in the same cell. Each remote player is a ghost: walk, look, worn gear, draw, holster, fire, reload, ADS, and jump. Hits on a remote ghost apply HP on that player. Unique NPCs in the host's current cell puppet on guests (match by ref, no clone). Leveled encounters, loot, and quests stay local. No VATS.
-
-Wire protocol is 10. Older plugins are rejected. Target runtime is Steam **1.11.240**, F4SE **0.7.9**.
-
-The server is `CommonwealthMP.Server` (UDP 7777 by default). The client is an F4SE plugin (`CommonwealthMP.dll`).
+Target runtime: Steam **1.11.240**, F4SE **0.7.9**.
+Server: `CommonwealthMP.Server` (UDP 7777 by default). Client: F4SE plugin `CommonwealthMP.dll`.
 
 ## Playability
 
-Two players, same Fallout 4 runtime, F4SE, and plugin build.
+I would not call it "playable" yet. It is a work-in-progress, and the plugin is not stable. Expect crashes, desyncs, and other rather weird issues :D
+You can run around with friends, but do not expect to be able to reliably play :)
 
-Install F4SE 0.7.9 and Address Library for 1.11.240, then the MO2 zip (DLL + `CommonwealthMP.ini`). `CommonwealthMP.esp` is optional. Run the server. Host: load any in-world save, then `cmp_join 127 0 0 1 7777`. Guest: Join Server on the title (Name, Host, Port), or load a save and `cmp_join`.
-
-First in-world joiner is host and is not warped. A new guest lands at the host. Menu join still needs a Commonwealth exterior host. Same-cell interiors work once you are both there.
-
-`cmp_status` should show `ghosts=1 3D=1` when the remote body has a mesh. Join IP is the session. Tailscale to `:7777`, or forward UDP 7777.
-
-A crash writes `CommonwealthMP.crash.txt` and `CommonwealthMP.dmp` under `Documents\My Games\Fallout4\F4SE\`.
-
-## Layout
-
-| Path | Role |
-| --- | --- |
-| `protocol/` | Shared UDP headers |
-| `server/` | Dedicated server (Windows and Linux) |
-| `tools/probe/` | Fake client (no Fallout 4) |
-| `tests/` | Offline CTest |
-| `plugin/` | F4SE plugin (Windows, Steam 1.11.240) |
-| `data/` | INI and optional ESP |
-| `mod/CommonwealthMP/` | MO2 staging tree |
 
 ## Build the server
 
@@ -64,7 +45,7 @@ dist/server/CommonwealthMP.Server                    # Linux
 ```
 
 
-The test suite ifor now isnt involving Fallout 4s runtime but just makes sanity checks on the server.
+The test suite does not involve the Fallout 4 runtime; it only runs server sanity checks.
 
 ## Setup
 

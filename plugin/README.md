@@ -1,6 +1,6 @@
 # Plugin (F4SE)
 
-Steam **1.11.240**, F4SE **0.7.9**, Address Library. Protocol 10.
+Steam **1.11.240**, F4SE **0.7.9**, Address Library. Protocol 11.
 
 ```
 setup.bat --deps-only
