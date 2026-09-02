@@ -53,5 +53,7 @@ jobs:
           xmake build
       - uses: actions/upload-artifact@v4
         with:
-          name: CommonwealthMP.dll
-          path: plugin/build/windows/x64/releasedbg/CommonwealthMP.dll
+          name: CommonwealthMP-plugin
+          path: |
+            plugin/build/windows/x64/releasedbg/CommonwealthMP.dll
+            plugin/build/windows/x64/releasedbg/discord_game_sdk.dll

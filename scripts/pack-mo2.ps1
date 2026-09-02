@@ -124,6 +124,13 @@ function Find-PluginDll([string]$RepoRoot, [string]$Override) {
 	)[0]
 }
 
+function Find-DiscordSdkDll([string]$PluginDllPath) {
+	if (-not $PluginDllPath) { return $null }
+	$beside = Join-Path (Split-Path -Parent $PluginDllPath) "discord_game_sdk.dll"
+	if (Test-Path -LiteralPath $beside) { return $beside }
+	return $null
+}
+
 function Test-PluginSourcesNewer([string]$RepoRoot, [string]$DllPath) {
 	if (-not (Test-Path -LiteralPath $DllPath)) { return $true }
 	$dllTime = (Get-Item -LiteralPath $DllPath).LastWriteTimeUtc
@@ -134,10 +141,6 @@ function Test-PluginSourcesNewer([string]$RepoRoot, [string]$DllPath) {
 			Get-ChildItem -LiteralPath $srcRoot -Recurse -File |
 				Where-Object { $_.Extension -match '\.(cpp|h|hpp)$' }
 		)
-	}
-	$xmakeLua = Join-Path $RepoRoot "plugin\xmake.lua"
-	if (Test-Path -LiteralPath $xmakeLua) {
-		$inputs += Get-Item -LiteralPath $xmakeLua
 	}
 	$protocol = Join-Path $RepoRoot "protocol"
 	if (Test-Path -LiteralPath $protocol) {
@@ -164,6 +167,11 @@ if ($Build -or $ForceRebuild) {
 $dllPath = Find-PluginDll $root $Dll
 if (-not $dllPath -or -not (Test-Path -LiteralPath $dllPath)) {
 	throw "CommonwealthMP.dll not built. Run with -Build, or scripts\build-plugin.ps1 first."
+}
+
+$discordSdkDll = Find-DiscordSdkDll $dllPath
+if (-not $discordSdkDll) {
+	throw "discord_game_sdk.dll missing next to CommonwealthMP.dll (rebuild plugin so xmake after_build copies it)."
 }
 
 if (-not $Build -and -not $ForceRebuild -and (Test-PluginSourcesNewer $root $dllPath)) {
@@ -195,7 +203,9 @@ $hasEsp = Test-Path -LiteralPath $espSrc
 $plugins = Join-Path $stage "F4SE\Plugins"
 New-Item -ItemType Directory -Force -Path $plugins | Out-Null
 Copy-Item -LiteralPath $dllPath -Destination (Join-Path $plugins "CommonwealthMP.dll") -Force
+Copy-Item -LiteralPath $discordSdkDll -Destination (Join-Path $plugins "discord_game_sdk.dll") -Force
 Copy-Item -LiteralPath $ini -Destination (Join-Path $plugins "CommonwealthMP.ini") -Force
+Write-Host "  F4SE\Plugins\discord_game_sdk.dll staged"
 $reporterCandidates = @(
 	(Join-Path $root "tools\cmp-reporter\dist\cmp-reporter.exe"),
 	(Join-Path $root "tools\cmp-reporter\target\release\cmp-reporter.exe")
@@ -292,6 +302,7 @@ if (-not $NoZip) {
 			Copy-Item -LiteralPath (Join-Path $stage "CommonwealthMP.esp") -Destination (Join-Path $pack "CommonwealthMP.esp") -Force
 		}
 		Copy-Item -LiteralPath (Join-Path $plugins "CommonwealthMP.dll") -Destination (Join-Path $pack "F4SE\Plugins\CommonwealthMP.dll") -Force
+		Copy-Item -LiteralPath (Join-Path $plugins "discord_game_sdk.dll") -Destination (Join-Path $pack "F4SE\Plugins\discord_game_sdk.dll") -Force
 		Copy-Item -LiteralPath (Join-Path $plugins "CommonwealthMP.ini") -Destination (Join-Path $pack "F4SE\Plugins\CommonwealthMP.ini") -Force
 		if ($hasReporter) {
 			Copy-Item -LiteralPath (Join-Path $plugins "cmp-reporter.exe") -Destination (Join-Path $pack "F4SE\Plugins\cmp-reporter.exe") -Force
@@ -347,6 +358,7 @@ try {
 } catch {
 	throw "Failed to copy DLL into MO2 (is Fallout 4 still locking it?): $destDll`n$_"
 }
+Copy-Item -LiteralPath (Join-Path $plugins "discord_game_sdk.dll") -Destination (Join-Path $dest "F4SE\Plugins\discord_game_sdk.dll") -Force
 Copy-Item -LiteralPath (Join-Path $plugins "CommonwealthMP.ini") -Destination $destIni -Force
 if ($hasReporter) {
 	Copy-Item -LiteralPath (Join-Path $plugins "cmp-reporter.exe") -Destination (Join-Path $dest "F4SE\Plugins\cmp-reporter.exe") -Force

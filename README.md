@@ -56,7 +56,7 @@ setup.bat
 ```
 
 `setup.bat --deps-only` skips Flex. `setup.sh` is the same for WSL/macOS/Linux helpers.
-Third-party C++ libs are git submodules under `plugin/lib/` (`commonlibf4`, `discord-rpc`).
+Third-party C++: `commonlibf4` is a git submodule under `plugin/lib/`. Discord Game SDK comes from xmake (`add_requires("discord")`) and ships `discord_game_sdk.dll` next to the plugin.
 The Scaleform Flex SDK lives in `interface/swf/_tools/`.
 
 

@@ -11,6 +11,7 @@ add_rules("mode.debug", "mode.releasedbg")
 
 add_requires("imgui", { configs = { dx11 = true, win32 = true } })
 add_requires("rapidjson")
+add_requires("discord 3.2.1")
 
 target("CommonwealthMP")
 	set_values("xse.plugin.name", "CommonwealthMP")
@@ -25,18 +26,15 @@ target("CommonwealthMP")
 
 	add_files("src/**.cpp|src/udp_win.cpp")
 	add_files("src/udp_win.cpp", { pch = false })
-	add_files(
-		"lib/discord-rpc/src/discord_rpc.cpp",
-		"lib/discord-rpc/src/connection_win.cpp",
-		"lib/discord-rpc/src/discord_register_win.cpp",
-		"lib/discord-rpc/src/rpc_connection.cpp",
-		"lib/discord-rpc/src/serialization.cpp"
-	)
 	add_headerfiles("src/**.h")
-	add_includedirs("src", "../protocol", "lib/discord-rpc/include")
-	add_packages("imgui", "rapidjson")
-	add_defines("DISCORD_WINDOWS", 'CMP_DISCORD_APP_ID="1544466839742971924"', 'CMP_DISCORD_IMAGE_KEY="cmp_logo1"')
-	add_syslinks("ws2_32", "dbghelp", "psapi", "user32", "d3d11", "dxgi", "d3dcompiler", "advapi32")
+	add_includedirs("src", "../protocol")
+	add_packages("imgui", "rapidjson", "discord")
+	add_defines('CMP_DISCORD_APP_ID="1544466839742971924"', 'CMP_DISCORD_IMAGE_KEY="cmp_logo1"')
+	add_syslinks("ws2_32", "dbghelp", "psapi", "user32", "d3d11", "dxgi", "d3dcompiler", "advapi32", "delayimp")
+	-- DLL link uses shflags on MSVC; ldflags alone never reached link.exe (0x7E at F4SE load).
+	-- Also enforced in discord.cpp via #pragma comment(linker, "/DELAYLOAD:...").
+	add_shflags("/DELAYLOAD:discord_game_sdk.dll", { force = true })
+	add_ldflags("/DELAYLOAD:discord_game_sdk.dll", { force = true })
 	set_pcxxheader("src/pch.h")
 	add_includedirs("gens")
 
@@ -61,4 +59,19 @@ target("CommonwealthMP")
 		if old ~= content then
 			io.writefile(meta, content)
 		end
+	end)
+
+	after_build(function (target)
+		local pkg = target:pkg("discord")
+		if not pkg then
+			return
+		end
+		local src = path.join(pkg:installdir(), "bin", "discord_game_sdk.dll")
+		if not os.isfile(src) then
+			src = path.join(pkg:installdir("bin"), "discord_game_sdk.dll")
+		end
+		if not os.isfile(src) then
+			raise("discord_game_sdk.dll missing from discord package: " .. src)
+		end
+		os.cp(src, path.join(target:targetdir(), "discord_game_sdk.dll"))
 	end)

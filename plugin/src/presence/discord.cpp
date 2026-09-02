@@ -3,10 +3,13 @@
 #include "presence.h"
 #include "cmp_util.hpp"
 
-#include <discord_rpc.h>
+#pragma pack(push, 8)
+#include <discord.h>
+#pragma pack(pop)
 
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 
@@ -15,7 +18,102 @@
 #endif
 #include <Windows.h>
 
+// F4SE loads plugins from Data/F4SE/Plugins; the OS only searches beside Fallout4.exe
+// for hard imports. Delay-load so LoadDiscordSdkBesidePlugin() can LoadLibrary the
+// side-by-side discord_game_sdk.dll before the first DiscordCreate call.
+#pragma comment(lib, "delayimp.lib")
+#pragma comment(linker, "/DELAYLOAD:discord_game_sdk.dll")
+
 namespace cmp_presence {
+
+namespace {
+
+discord::Core* g_discordCore{ nullptr };
+HMODULE g_discordSdkModule{ nullptr };
+
+bool LoadDiscordSdkBesidePlugin()
+{
+	if (g_discordSdkModule) {
+		return true;
+	}
+
+	HMODULE self = nullptr;
+	if (!GetModuleHandleExW(
+			GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+			reinterpret_cast<LPCWSTR>(&LoadDiscordSdkBesidePlugin),
+			&self) ||
+		!self) {
+		g_discordError = "GetModuleHandleEx failed for CommonwealthMP.dll";
+		return false;
+	}
+
+	wchar_t modulePath[MAX_PATH]{};
+	const DWORD n = GetModuleFileNameW(self, modulePath, MAX_PATH);
+	if (n == 0 || n >= MAX_PATH) {
+		g_discordError = "GetModuleFileNameW failed for CommonwealthMP.dll";
+		return false;
+	}
+
+	wchar_t* slash = wcsrchr(modulePath, L'\\');
+	if (!slash) {
+		g_discordError = "plugin path has no directory";
+		return false;
+	}
+	slash[1] = L'\0';
+	wcsncat_s(modulePath, L"discord_game_sdk.dll", _TRUNCATE);
+
+	g_discordSdkModule = LoadLibraryW(modulePath);
+	if (!g_discordSdkModule) {
+		g_discordError = "LoadLibrary discord_game_sdk.dll failed (ship it next to CommonwealthMP.dll)";
+		return false;
+	}
+	return true;
+}
+
+std::uint64_t DiscordAppIdU64()
+{
+	const char* appId = DiscordAppId();
+	if (!appId || !appId[0]) {
+		return 0;
+	}
+	char* end = nullptr;
+	const unsigned long long value = std::strtoull(appId, &end, 10);
+	if (!end || end == appId || *end != '\0') {
+		return 0;
+	}
+	return static_cast<std::uint64_t>(value);
+}
+
+void PollDiscordUser()
+{
+	if (!g_discordCore) {
+		return;
+	}
+
+	discord::User user{};
+	const discord::Result result = g_discordCore->UserManager().GetCurrentUser(&user);
+	if (result == discord::Result::Ok) {
+		const char* username = user.GetUsername();
+		std::string name = username ? username : "";
+		if (!g_discordConnected || g_discordUser != name) {
+			g_discordConnected = true;
+			g_discordUser = std::move(name);
+			g_discordError.clear();
+			REX::INFO("Discord Game SDK connected as {}", g_discordUser.empty() ? "?" : g_discordUser);
+			CMP_Presence_Invalidate();
+		}
+		return;
+	}
+
+	if (g_discordConnected) {
+		g_discordConnected = false;
+		g_discordUser.clear();
+		g_discordError = "disconnected result=" + std::to_string(static_cast<int>(result));
+		REX::WARN("Discord Game SDK {}", g_discordError);
+	}
+}
+
+}  // namespace
 
 bool IsProcessElevated()
 {
@@ -60,6 +158,7 @@ void RefreshDiscordDiagnostics()
 				g_discordError += "; Fallout4 is elevated - run Discord as admin or launch FO4 normally";
 			}
 		} else if (g_discordError == "waiting for Discord desktop" ||
+		           g_discordError == "connecting to Discord" ||
 		           g_discordError.find("IPC pipe not found") != std::string::npos) {
 			g_discordError = "Discord pipe open; enable Settings > Activity Privacy > Display current activity";
 		}
@@ -86,56 +185,20 @@ const char* DiscordAppId()
 
 bool DiscordAppIdValid()
 {
-	const char* appId = DiscordAppId();
-	return appId && appId[0] != '\0' && std::strcmp(appId, "0") != 0;
-}
-
-void DiscordReady(const DiscordUser* user)
-{
-	g_discordConnected = true;
-	g_discordError.clear();
-	if (user && user->username) {
-		g_discordUser = user->username;
-		if (user->discriminator && user->discriminator[0] != '0') {
-			g_discordUser += '#';
-			g_discordUser += user->discriminator;
-		}
-	} else {
-		g_discordUser.clear();
-	}
-	REX::INFO("Discord RPC connected as {}", g_discordUser.empty() ? "?" : g_discordUser);
-	CMP_Presence_Invalidate();
-}
-
-void DiscordDisconnected(int errorCode, const char* message)
-{
-	g_discordConnected = false;
-	g_discordUser.clear();
-	g_discordError = "disconnected " + std::to_string(errorCode);
-	if (message && message[0]) {
-		g_discordError += ' ';
-		g_discordError += message;
-	}
-	REX::WARN("Discord RPC {}", g_discordError);
-}
-
-void DiscordErrored(int errorCode, const char* message)
-{
-	g_discordError = "error " + std::to_string(errorCode);
-	if (message && message[0]) {
-		g_discordError += ' ';
-		g_discordError += message;
-	}
-	REX::WARN("Discord RPC {}", g_discordError);
+	return DiscordAppIdU64() != 0;
 }
 
 void ShutdownDiscord()
 {
-	if (!g_discordInitialized) {
+	if (!g_discordInitialized && !g_discordCore) {
 		return;
 	}
-	Discord_ClearPresence();
-	Discord_Shutdown();
+	if (g_discordCore) {
+		g_discordCore->ActivityManager().ClearActivity([](discord::Result) {});
+		g_discordCore->RunCallbacks();
+		delete g_discordCore;
+		g_discordCore = nullptr;
+	}
 	g_discordInitialized = false;
 	g_discordConnected = false;
 	g_discordUser.clear();
@@ -146,7 +209,8 @@ bool InitDiscord(bool force)
 	if (!g_discordWanted) {
 		return false;
 	}
-	if (!DiscordAppIdValid()) {
+	const std::uint64_t appId = DiscordAppIdU64();
+	if (appId == 0) {
 		g_discordError = "CMP_DISCORD_APP_ID missing at build time";
 		return false;
 	}
@@ -163,49 +227,67 @@ bool InitDiscord(bool force)
 		ShutdownDiscord();
 	}
 
-	DiscordEventHandlers handlers{};
-	handlers.ready = DiscordReady;
-	handlers.disconnected = DiscordDisconnected;
-	handlers.errored = DiscordErrored;
-	Discord_Initialize(DiscordAppId(), &handlers, 0, nullptr);
+	if (!LoadDiscordSdkBesidePlugin()) {
+		REX::WARN("Discord Game SDK {}", g_discordError);
+		return false;
+	}
+
+	discord::Core* core = nullptr;
+	const discord::Result createResult =
+		discord::Core::Create(appId, DiscordCreateFlags_NoRequireDiscord, &core);
+	if (createResult != discord::Result::Ok || !core) {
+		g_discordError = "Core::Create failed result=" + std::to_string(static_cast<int>(createResult));
+		REX::WARN("Discord Game SDK {}", g_discordError);
+		return false;
+	}
+
+	g_discordCore = core;
 	g_discordInitialized = true;
 	g_discordLastInitSec = now;
+	g_discordConnected = false;
+	g_discordUser.clear();
 	RefreshDiscordDiagnostics();
 	g_discordError = g_discordPipeReachable ? "connecting to Discord" : "waiting for Discord desktop";
-	REX::INFO("Discord RPC initialize appId={} pipe={} elevated={}",
+	REX::INFO("Discord Game SDK initialize appId={} pipe={} elevated={}",
 		DiscordAppId(), g_discordPipeReachable ? "yes" : "no", g_discordProcessElevated);
-	return false;
+	PollDiscordUser();
+	return g_discordConnected;
 }
 
 void PushDiscord(const PresenceSnapshot& snap)
 {
-	if (!g_discordInitialized) {
+	if (!g_discordCore) {
 		return;
 	}
 	cmp::copy_cstr(g_discordDetails, sizeof(g_discordDetails), snap.details.c_str());
 	cmp::copy_cstr(g_discordState, sizeof(g_discordState), snap.state.c_str());
 
-	DiscordRichPresence presence{};
-	presence.details = g_discordDetails;
-	presence.state = g_discordState;
-	presence.largeImageKey = CMP_DISCORD_IMAGE_KEY;
-	presence.largeImageText = "CMP";
+	discord::Activity activity{};
+	activity.SetDetails(g_discordDetails);
+	activity.SetState(g_discordState);
+	activity.GetAssets().SetLargeImage(CMP_DISCORD_IMAGE_KEY);
+	activity.GetAssets().SetLargeText("CMP");
 	if (snap.phase == PresencePhase::Host || snap.phase == PresencePhase::Guest) {
 		if (g_sessionStart > 0) {
-			presence.startTimestamp = g_sessionStart;
+			activity.GetTimestamps().SetStart(g_sessionStart);
 		}
 		if (snap.maxPlayers > 0) {
-			presence.partySize = static_cast<int>(snap.playerCount);
-			presence.partyMax = static_cast<int>(snap.maxPlayers);
+			activity.GetParty().GetSize().SetCurrentSize(static_cast<std::int32_t>(snap.playerCount));
+			activity.GetParty().GetSize().SetMaxSize(static_cast<std::int32_t>(snap.maxPlayers));
 		}
 	}
-	Discord_UpdatePresence(&presence);
+
+	g_discordCore->ActivityManager().UpdateActivity(activity, [](discord::Result result) {
+		if (result != discord::Result::Ok) {
+			g_discordError = "UpdateActivity result=" + std::to_string(static_cast<int>(result));
+		}
+	});
 	g_discordLastPushSec = NowSec();
 }
 
 void TickDiscordConnection()
 {
-	if (!g_discordInitialized) {
+	if (!g_discordCore) {
 		return;
 	}
 	static double lastDiagSec = 0.0;
@@ -214,7 +296,8 @@ void TickDiscordConnection()
 		lastDiagSec = now;
 		RefreshDiscordDiagnostics();
 	}
-	Discord_RunCallbacks();
+	g_discordCore->RunCallbacks();
+	PollDiscordUser();
 }
 
 }  // namespace cmp_presence

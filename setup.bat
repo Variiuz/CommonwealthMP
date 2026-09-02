@@ -2,7 +2,7 @@
 setlocal EnableExtensions EnableDelayedExpansion
 
 rem CommonwealthMP root bootstrap:
-rem   1) git submodules (commonlibf4, discord-rpc)
+rem   1) git submodules (commonlibf4)
 rem   2) Scaleform Flex toolchain under interface\swf\_tools (optional rebuild of Menu SWF)
 rem
 rem Usage:
