@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <fstream>
 #include <string>
+#include <vector>
 
 #include "cmp_protocol.hpp"
 
@@ -11,15 +12,20 @@ struct ServerConfig {
 	std::string motd;
 	std::uint16_t port{ cmp::kDefaultPort };
 	bool fake{ true };
+	int fakeCount{ 1 };
 	int maxPlayers{ 8 };
 	bool verbose{ false };
 	bool quiet{ false };
 	bool jsonLog{ false };
+	bool pvp{ true };
+	std::string password;
+	std::uint32_t modHash{ 0 };
 	float interestUu{ 20000.0f };
 	std::string logFile;
 	std::string sessionDir;
 	std::string configPath;
 	bool resetSession{ false };
+	std::vector<std::string> banKeys;
 };
 
 inline std::string trim_ini(std::string s)
@@ -47,6 +53,22 @@ inline bool parse_bool_ini(const std::string& v, bool fallback)
 	return fallback;
 }
 
+inline std::uint32_t parse_mod_hash_ini(const std::string& v)
+{
+	if (v.empty()) {
+		return 0;
+	}
+	std::string s = trim_ini(v);
+	if (s.size() > 2 && (s[0] == '0' && (s[1] == 'x' || s[1] == 'X'))) {
+		s = s.substr(2);
+	}
+	try {
+		return static_cast<std::uint32_t>(std::stoul(s, nullptr, 16));
+	} catch (...) {
+		return 0;
+	}
+}
+
 inline bool write_default_server_ini(const std::string& path)
 {
 	std::ofstream out(path, std::ios::out | std::ios::trunc);
@@ -59,8 +81,12 @@ inline bool write_default_server_ini(const std::string& path)
 		<< "motd=\n"
 		<< "port=7777\n"
 		<< "fake=1\n"
+		<< "fake_count=1\n"
 		<< "max_players=8\n"
 		<< "interest_uu=20000\n"
+		<< "pvp=1\n"
+		<< "password=\n"
+		<< "# mod_hash=0\n"
 		<< "verbose=0\n"
 		<< "quiet=0\n"
 		<< "json_log=0\n"
@@ -98,6 +124,11 @@ inline bool load_server_ini(const std::string& path, ServerConfig& cfg)
 			}
 		} else if (key == "fake") {
 			cfg.fake = parse_bool_ini(val, cfg.fake);
+		} else if (key == "fake_count") {
+			try {
+				cfg.fakeCount = cmp::clamp_fake_count(std::stoi(val));
+			} catch (...) {
+			}
 		} else if (key == "max_players") {
 			try {
 				cfg.maxPlayers = std::stoi(val);
@@ -109,6 +140,12 @@ inline bool load_server_ini(const std::string& path, ServerConfig& cfg)
 			cfg.quiet = parse_bool_ini(val, cfg.quiet);
 		} else if (key == "json_log") {
 			cfg.jsonLog = parse_bool_ini(val, cfg.jsonLog);
+		} else if (key == "pvp") {
+			cfg.pvp = parse_bool_ini(val, cfg.pvp);
+		} else if (key == "password") {
+			cfg.password = val;
+		} else if (key == "mod_hash") {
+			cfg.modHash = parse_mod_hash_ini(val);
 		} else if (key == "interest_uu") {
 			try {
 				cfg.interestUu = std::stof(val);
@@ -123,8 +160,12 @@ inline bool load_server_ini(const std::string& path, ServerConfig& cfg)
 	if (cfg.maxPlayers < 1) {
 		cfg.maxPlayers = 1;
 	}
+	cfg.fakeCount = cmp::clamp_fake_count(cfg.fakeCount);
 	if (cfg.interestUu < 0.0f) {
 		cfg.interestUu = 0.0f;
+	}
+	if (cfg.password.size() > 15) {
+		cfg.password.resize(15);
 	}
 	return true;
 }

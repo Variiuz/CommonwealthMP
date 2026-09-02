@@ -4,8 +4,13 @@ name=CommonwealthMP
 motd=
 port=7777
 fake=1
+fake_count=1
+# Dummy pose flags cycle draw/ADS/fire/reload/jump while fake is on.
 max_players=8
 interest_uu=20000
+pvp=1
+password=
+# mod_hash=0
 verbose=0
 quiet=0
 json_log=0

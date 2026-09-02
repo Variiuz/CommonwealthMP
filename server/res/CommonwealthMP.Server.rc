@@ -1,0 +1,27 @@
+1 VERSIONINFO
+FILEVERSION     0,6,0,0
+PRODUCTVERSION  0,6,0,0
+FILEOS          0x40004
+FILETYPE        0x1
+{
+    BLOCK "StringFileInfo"
+    {
+        BLOCK "040904B0"
+        {
+            VALUE "CompanyName", "CommonwealthMP"
+            VALUE "FileDescription", "CommonwealthMP Dedicated Server"
+            VALUE "FileVersion", "0.6.0"
+            VALUE "InternalName", "CommonwealthMP.Server"
+            VALUE "LegalCopyright", "GPL-3.0"
+            VALUE "OriginalFilename", "CommonwealthMP.Server.exe"
+            VALUE "ProductName", "CommonwealthMP"
+            VALUE "ProductVersion", "0.6.0"
+        }
+    }
+    BLOCK "VarFileInfo"
+    {
+        VALUE "Translation", 0x409, 1200
+    }
+}
+
+IDI_ICON1 ICON "cmp.ico"

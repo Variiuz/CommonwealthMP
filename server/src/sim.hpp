@@ -23,7 +23,18 @@ inline bool allow_rate(std::unordered_map<std::string, RateBucket>& buckets, con
 	return b.count <= maxPerSec;
 }
 
-inline bool in_interest(const PlayerPose& a, bool haveA, const PlayerPose& b, bool haveB, float maxUu)
+inline bool in_interest(
+	std::uint32_t locA,
+	float ax,
+	float ay,
+	float az,
+	bool haveA,
+	std::uint32_t locB,
+	float bx,
+	float by,
+	float bz,
+	bool haveB,
+	float maxUu)
 {
 	if (maxUu <= 0.0f) {
 		return true;
@@ -31,13 +42,29 @@ inline bool in_interest(const PlayerPose& a, bool haveA, const PlayerPose& b, bo
 	if (!haveA || !haveB) {
 		return true;
 	}
-	if (a.locationFormId != 0 && b.locationFormId != 0 && a.locationFormId != b.locationFormId) {
+	if (locA != 0 && locB != 0 && locA != locB) {
 		return true;
 	}
-	const float dx = a.x - b.x;
-	const float dy = a.y - b.y;
-	const float dz = a.z - b.z;
+	const float dx = ax - bx;
+	const float dy = ay - by;
+	const float dz = az - bz;
 	return (dx * dx + dy * dy + dz * dz) <= (maxUu * maxUu);
+}
+
+inline bool in_interest(const PlayerPose& a, bool haveA, const PlayerPose& b, bool haveB, float maxUu)
+{
+	return in_interest(
+		a.locationFormId, a.x, a.y, a.z, haveA,
+		b.locationFormId, b.x, b.y, b.z, haveB,
+		maxUu);
+}
+
+inline bool in_interest(const ActorPose& a, const PlayerPose& b, bool haveB, float maxUu)
+{
+	return in_interest(
+		a.locationFormId, a.x, a.y, a.z, true,
+		b.locationFormId, b.x, b.y, b.z, haveB,
+		maxUu);
 }
 
 }  // namespace cmp
