@@ -10,8 +10,9 @@
 namespace cmp_motion {
 
 inline constexpr std::size_t kPoseRingSize = 8;
-inline constexpr float kSnapUu = 512.0f;
+inline constexpr float kSnapUu = 2048.0f;
 inline constexpr float kMinMoveUu = 0.01f;
+inline constexpr float kCatchUpMult = 2.5f;
 
 struct TimedSample {
 	double recvSec{ 0.0 };
@@ -188,7 +189,8 @@ inline ApplyResult StepToward(
 		return r;
 	}
 	const float speed = std::max(target.speed, 40.0f);
-	const float step = std::min(dist, speed * dt * 1.35f);
+	const float catchUp = dist > 256.0f ? kCatchUpMult : 1.35f;
+	const float step = std::min(dist, speed * dt * catchUp);
 	const float s = step / dist;
 	r.x = curX + dx * s;
 	r.y = curY + dy * s;

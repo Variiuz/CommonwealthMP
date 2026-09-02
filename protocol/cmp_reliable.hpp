@@ -24,6 +24,7 @@ struct ReliablePending {
 
 struct ReliableChannel {
 	std::uint16_t nextSeq{ 1 };
+	int maxTries{ kReliableMaxTries };
 	std::unordered_map<std::uint16_t, ReliablePending> pending;
 	std::unordered_map<std::uint16_t, double> handledInbound;
 
@@ -32,6 +33,34 @@ struct ReliableChannel {
 		nextSeq = 1;
 		pending.clear();
 		handledInbound.clear();
+	}
+
+	void set_max_tries(int tries)
+	{
+		maxTries = std::max(1, tries);
+	}
+
+	[[nodiscard]] bool is_handled(std::uint16_t seq) const
+	{
+		return seq != 0 && handledInbound.contains(seq);
+	}
+
+	void mark_handled(std::uint16_t seq, double now)
+	{
+		if (seq == 0) {
+			return;
+		}
+		handledInbound[seq] = now;
+		if (handledInbound.size() > 256) {
+			const double cutoff = now - 30.0;
+			for (auto it = handledInbound.begin(); it != handledInbound.end();) {
+				if (it->second < cutoff) {
+					it = handledInbound.erase(it);
+				} else {
+					++it;
+				}
+			}
+		}
 	}
 
 	std::uint16_t stamp(void* data, int len)
@@ -82,21 +111,11 @@ struct ReliableChannel {
 		if (seq == 0) {
 			return false;
 		}
-		if (auto it = handledInbound.find(seq); it != handledInbound.end()) {
-			it->second = now;
+		if (is_handled(seq)) {
+			handledInbound[seq] = now;
 			return true;
 		}
-		handledInbound[seq] = now;
-		if (handledInbound.size() > 256) {
-			const double cutoff = now - 30.0;
-			for (auto it = handledInbound.begin(); it != handledInbound.end();) {
-				if (it->second < cutoff) {
-					it = handledInbound.erase(it);
-				} else {
-					++it;
-				}
-			}
-		}
+		mark_handled(seq, now);
 		return false;
 	}
 
@@ -104,11 +123,12 @@ struct ReliableChannel {
 	void tick(double now, SendFn&& send)
 	{
 		std::vector<std::uint16_t> drop;
+		const int triesCap = std::max(1, maxTries);
 		for (auto& [seq, p] : pending) {
 			if (now - p.lastSendSec < kReliableResendSec) {
 				continue;
 			}
-			if (p.tries >= kReliableMaxTries) {
+			if (p.tries >= triesCap) {
 				drop.push_back(seq);
 				continue;
 			}

@@ -44,8 +44,18 @@ void send_blob(CmpSocket sock, const sockaddr_in& dest, cmp::Msg type, std::uint
 
 void reject_to(CmpSocket sock, const sockaddr_in& dest, cmp::RejectReason reason, const char* text)
 {
-	const auto msg = cmp::make_reject(reason, text);
-	send_to(sock, dest, &msg, sizeof(msg), "Reject");
+	auto msg = cmp::make_reject(reason, text);
+	// Pre-join rejects have no Client reliable channel. Stamp as reliable and
+	// fire a few copies so the waiting client still sees the reason under loss.
+	static std::uint16_t rejectSeq = 1;
+	msg.header.seq = rejectSeq++;
+	if (rejectSeq == 0) {
+		rejectSeq = 1;
+	}
+	msg.header.flags = static_cast<std::uint8_t>(msg.header.flags | cmp::HeaderFlag::Reliable);
+	for (int i = 0; i < 3; ++i) {
+		send_to(sock, dest, &msg, sizeof(msg), "Reject");
+	}
 	LOG_INFO("tx Reject %s (%s) -> %s", cmp::reject_name(reason), text, addr_key(dest).c_str());
 }
 

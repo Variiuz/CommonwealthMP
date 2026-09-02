@@ -185,22 +185,43 @@ void CMP_SavePlayerName(const std::string& name)
 		trimmed.resize(31);
 	}
 
+	// Treat placeholder "Player" as unset so Steam can resolve on next launch.
+	const bool placeholder = trimmed.empty() || trimmed == "Player";
 	const auto ini = IniPath();
 	using WriteFn = std::int32_t(__stdcall*)(const char*, const char*, const char*, const char*);
 	static const auto writeIni = reinterpret_cast<WriteFn>(
 		REX::W32::GetProcAddress(REX::W32::GetModuleHandleA("kernel32.dll"), "WritePrivateProfileStringA"));
 	if (writeIni) {
-		writeIni("Session", "PlayerName", trimmed.c_str(), ini.c_str());
+		writeIni("Session", "PlayerName", placeholder ? "" : trimmed.c_str(), ini.c_str());
 	}
 
-	if (trimmed.empty()) {
+	if (placeholder) {
 		auto steam = CMP_SteamPersonaName();
-		s.settings.playerName = steam.empty() ? "fo4" : std::move(steam);
+		s.settings.playerName = steam.empty() ? "Player" : std::move(steam);
 		REX::INFO("saved PlayerName empty (using {})", s.settings.playerName);
 		return;
 	}
 	s.settings.playerName = std::move(trimmed);
 	REX::INFO("saved PlayerName {}", s.settings.playerName);
+}
+
+void CMP_RefreshPlayerNameFromSteam(bool force)
+{
+	auto& s = CMP_Session();
+	const auto ini = IniPath();
+	const auto iniName = IniStr("Session", "PlayerName", "", ini);
+	if (!force && !iniName.empty() && iniName != "Player") {
+		return;
+	}
+	if (!force && s.settings.playerName != "Player" && !s.settings.playerName.empty() && s.settings.playerName != "fo4") {
+		return;
+	}
+	auto steam = CMP_SteamPersonaName();
+	if (steam.empty()) {
+		return;
+	}
+	s.settings.playerName = std::move(steam);
+	REX::INFO("refreshed PlayerName from steam={}", s.settings.playerName);
 }
 
 void CMP_SavePassword(const std::string& password)

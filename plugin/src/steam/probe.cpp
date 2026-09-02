@@ -58,8 +58,11 @@ std::string CMP_SteamPersonaName()
 	if (!match.iface) {
 		return {};
 	}
-	auto* friends = reinterpret_cast<ISteamFriends014*>(match.iface);
-	return TruncateName(friends->GetPersonaName());
+	PersonaProbeCtx ctx{ reinterpret_cast<ISteamFriends014*>(match.iface) };
+	if (!CMP_SehCall("steam_persona_name", PersonaProbeFn, &ctx) || !ctx.ok) {
+		return {};
+	}
+	return TruncateName(ctx.name);
 }
 
 std::string CMP_ProbeSteamLobby()

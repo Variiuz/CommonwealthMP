@@ -20,6 +20,7 @@
 void CMP_OnGameReady()
 {
 	auto& s = CMP_Session();
+	CMP_RefreshPlayerNameFromSteam(false);
 	if (!s.net.probedForms) {
 		s.net.probedForms = true;
 		CMP_ProbeForms();

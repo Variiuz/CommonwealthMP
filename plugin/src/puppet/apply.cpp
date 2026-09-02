@@ -256,6 +256,33 @@ void ApplyCombatFlags(
 		"pipboyLower");
 }
 
+void RetryStickyFlags(RE::Actor* actor, std::uint32_t flags, PuppetPrev& prev)
+{
+	++prev.stickyTicks;
+	if (prev.stickyTicks < kStickyRetryTicks) {
+		return;
+	}
+	prev.stickyTicks = 0;
+
+	const bool wantDrawn = cmp::has_pose_flag(flags, cmp::PoseFlag::Drawn);
+	if (wantDrawn && !actor->GetWeaponMagicDrawn()) {
+		actor->DrawWeaponMagicHands(true);
+		FireEvent(actor, "weaponDraw");
+	} else if (!wantDrawn && actor->GetWeaponMagicDrawn()) {
+		actor->DrawWeaponMagicHands(false);
+		FireEvent(actor, "weaponSheathe");
+	}
+
+	if (cmp::has_pose_flag(flags, cmp::PoseFlag::Sneak)) {
+		SetBoolVar(actor, "IsSneaking", true);
+		FireEvent(actor, "sneakStart");
+	}
+	if (cmp::has_pose_flag(flags, cmp::PoseFlag::Jumping)) {
+		SetBoolVar(actor, "bInJumpState", true);
+		FireEvent(actor, "JumpStandingStart");
+	}
+}
+
 }  // namespace cmp_puppet
 
 using namespace cmp_puppet;
@@ -303,13 +330,6 @@ void CMP_ApplyGhostPuppet(
 		if (moving) {
 			FireEvent(actor, "walkStart");
 		}
-		prev.movingTicks = 0;
-	} else if (moving) {
-		++prev.movingTicks;
-		if (prev.movingTicks >= kMoveStartRefreshTicks) {
-			FireEvent(actor, "MoveStart");
-			prev.movingTicks = 0;
-		}
 	}
 
 	if (!prev.have) {
@@ -319,7 +339,7 @@ void CMP_ApplyGhostPuppet(
 		if (cmp::has_pose_flag(flags, cmp::PoseFlag::Sprint)) {
 			FireEvent(actor, "sprintStart");
 		}
-	} else if (prev.have) {
+	} else {
 		const bool wasSneak = cmp::has_pose_flag(prev.flags, cmp::PoseFlag::Sneak);
 		const bool nowSneak = cmp::has_pose_flag(flags, cmp::PoseFlag::Sneak);
 		if (wasSneak != nowSneak) {
@@ -333,6 +353,11 @@ void CMP_ApplyGhostPuppet(
 	}
 
 	ApplyCombatFlags(actor, prev.flags, flags, prev.have, isGhost);
+	if (prev.have) {
+		RetryStickyFlags(actor, flags, prev);
+	} else {
+		prev.stickyTicks = 0;
+	}
 
 	prev.flags = flags;
 	prev.moving = moving;

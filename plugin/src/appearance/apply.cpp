@@ -204,38 +204,43 @@ void ApplyToNpc(RE::TESNPC* dest, Reader& r, RE::Actor* actor)
 			REX::INFO("Appearance miss head part {:X} {}", id, plug);
 		}
 	}
-	auto writeHeadParts = [&](RE::TESNPC* npc, const std::vector<RE::BGSHeadPart*>& headList) {
-		if (!npc || headList.empty()) {
-			return;
+	// Write onto the clone's own headParts only. Do not touch
+	// TESNPC::GetAlternateHeadPartListMap(): that global's CommonLib
+	// relocation has been crashing RtlFreeHeap on join/appearance apply
+	// (fake and real peers). Clones keep originalRace == formRace so the
+	// engine does not read the alternate map for them anyway.
+	dest->faceNPC = nullptr;
+	if (!parts.empty()) {
+		const int want = std::min(static_cast<int>(parts.size()), 127);
+		if (!dest->headParts || dest->numHeadParts < want) {
+			auto& mem = RE::MemoryManager::GetSingleton();
+			auto* neu = static_cast<RE::BGSHeadPart**>(
+				mem.Allocate(sizeof(RE::BGSHeadPart*) * static_cast<std::size_t>(want), 0, false));
+			if (neu) {
+				for (int i = 0; i < want; ++i) {
+					neu[i] = nullptr;
+				}
+				if (dest->headParts) {
+					mem.Deallocate(dest->headParts, false);
+				}
+				dest->headParts = neu;
+				dest->numHeadParts = static_cast<std::int8_t>(want);
+				REX::INFO("Appearance headParts realloc {} on {:08X}", want, dest->GetFormID());
+			}
 		}
-		if (npc->headParts && npc->numHeadParts > 0) {
-			const int n = std::min(static_cast<int>(headList.size()), static_cast<int>(npc->numHeadParts));
+		if (dest->headParts && dest->numHeadParts > 0) {
+			const int n = std::min(want, static_cast<int>(dest->numHeadParts));
 			for (int i = 0; i < n; ++i) {
-				npc->headParts[i] = headList[static_cast<std::size_t>(i)];
+				dest->headParts[i] = parts[static_cast<std::size_t>(i)];
 			}
-			npc->numHeadParts = static_cast<std::int8_t>(n);
-			if (n < static_cast<int>(headList.size())) {
-				REX::INFO("Appearance head part count truncated {} -> {} on {:08X}", headList.size(), n, npc->GetFormID());
+			for (int i = n; i < dest->numHeadParts; ++i) {
+				dest->headParts[i] = nullptr;
 			}
+			dest->numHeadParts = static_cast<std::int8_t>(n);
 		} else {
-			REX::WARN("Appearance headParts array missing on {:08X} (numHeadParts={})", npc->GetFormID(), npc->numHeadParts);
+			REX::WARN("Appearance headParts array missing on {:08X} (numHeadParts={})", dest->GetFormID(), dest->numHeadParts);
 		}
-		auto& altMap = RE::TESNPC::GetAlternateHeadPartListMap();
-		auto it = altMap.find(dest);
-		if (it == altMap.end()) {
-			RE::BSTArray<RE::BGSHeadPart*> altList;
-			for (auto* hp : headList) {
-				altList.push_back(hp);
-			}
-			altMap.emplace(dest, std::move(altList));
-		} else {
-			it->second.clear();
-			for (auto* hp : headList) {
-				it->second.push_back(hp);
-			}
-		}
-	};
-	writeHeadParts(dest, parts);
+	}
 	(void)appliedRace;
 
 	std::uint8_t nMorph = 0;
@@ -333,7 +338,7 @@ void ApplyToNpc(RE::TESNPC* dest, Reader& r, RE::Actor* actor)
 
 bool ApplyAppearanceBlob(RE::Actor* actor, const std::vector<std::uint8_t>& blob)
 {
-	if (!actor || blob.size() < 8) {
+	if (!actor || !actor->IsActor() || blob.size() < 8) {
 		return false;
 	}
 	Reader r{ std::span<const std::uint8_t>(blob.data(), blob.size()) };
@@ -344,6 +349,7 @@ bool ApplyAppearanceBlob(RE::Actor* actor, const std::vector<std::uint8_t>& blob
 	}
 	auto* npc = actor->GetNPC();
 	if (!npc) {
+		REX::WARN("Appearance refused: actor {:08X} has no ActorBase", actor->GetFormID());
 		return false;
 	}
 	ApplyToNpc(npc, r, actor);

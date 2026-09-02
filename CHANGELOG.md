@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.6.8
+
+Ghost sync and join reliability: less teleport/idle snap, working puppet anims and draw, better faces, PvP hits, nametags, Steam names, and server rate limits.
+
+- Server no longer ACKs rate-limited appearance/inventory/hit packets before accepting them (retries work again). Blob budget raised to 64/s, Hit to 24/s; Reject sent with reliable stamps; Hit relay is reliable.
+- Client staggers inventory after appearance on join; Hello retries while waiting for Welcome; ReliableRetries wired into the channel.
+- Ghost freeze calls EnableAI(false) once (not every ~30 ticks); dropped kAttackingDisabled; removed MoveStart refresh thrash; sticky redraw/sneak/jump retry; puppet reset before reapply.
+- Motion snap threshold raised; mid-range catch-up sped up; ghosts spawn at remote pose position.
+- Head parts realloc to full player count; faceNPC cleared (Minuteman clone no longer keeps a severed head). Alternate-map crash workaround kept.
+- Nametag height uses actor height/scale (~128 UU) instead of +180.
+- Steam persona resolved with SEH and versioned friends interfaces; placeholder "Player" is not sticky in the INI; refresh on game-ready and join.
+- Plugin and server version bumped to 0.6.8.
+
 ## 0.6.7
 
 Remote puppet polish: faces, weapon draw, locomotion, combat hits, menu poses, HUD indicators, and multiplayer menu UX.

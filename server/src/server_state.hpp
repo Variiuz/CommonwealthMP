@@ -22,7 +22,7 @@ constexpr int kFakeHz = 20;
 constexpr double kPersistIntervalSec = 2.0;
 constexpr double kStatusBarIntervalSec = 1.0;
 constexpr double kStatusLogIntervalSec = 30.0;
-constexpr const char* kServerVersion = "0.6.7";  // x-release-please-version
+constexpr const char* kServerVersion = "0.6.8";  // x-release-please-version
 
 namespace fs = std::filesystem;
 

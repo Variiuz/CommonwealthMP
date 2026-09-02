@@ -128,9 +128,15 @@ void OnHitEvent(const RE::TESHitEvent& ev)
 		return;
 	}
 
-	float damage = ev.hitData.healthDamage;
-	if (!(damage > 0.01f)) {
-		damage = ev.hitData.totalDamage;
+	float damage = 0.0f;
+	if (ev.usesHitData) {
+		damage = ev.hitData.healthDamage;
+		if (!(damage > 0.01f)) {
+			damage = ev.hitData.totalDamage;
+		}
+		if (!(damage > 0.01f)) {
+			damage = ev.hitData.physicalDamage;
+		}
 	}
 	damage = cmp::clamp_hit_damage(damage);
 	RestoreGhostHealth(target);
@@ -148,7 +154,7 @@ void OnHitEvent(const RE::TESHitEvent& ev)
 	g_lastHitSend[peer] = now;
 
 	const auto msg = cmp::make_hit(s.net.myPeerId, peer, damage);
-	cmp_udp_send(s.settings.host.c_str(), s.settings.port, &msg, static_cast<int>(sizeof(msg)));
+	CMP_Reliable_Send(&msg, static_cast<int>(sizeof(msg)));
 }
 
 }  // namespace

@@ -256,16 +256,16 @@ RE::Actor* SpawnGhostNative(const cmp::PlayerPose& pose)
 		return nullptr;
 	}
 
-	const auto here = player->GetPosition();
+	const RE::NiPoint3 spawnAt{ pose.x, pose.y, pose.z };
 	REX::INFO("CreateReferenceAtLocation begin base={:08X} peer={} cell={:08X} at ({:.0f},{:.0f},{:.0f})",
 		base->GetFormID(),
 		pose.peerId,
 		cell->GetFormID(),
-		here.x,
-		here.y,
-		here.z);
+		spawnAt.x,
+		spawnAt.y,
+		spawnAt.z);
 	RE::NEW_REFR_DATA spawn;
-	spawn.location = here;
+	spawn.location = spawnAt;
 	spawn.direction = RE::NiPoint3{ 0.0f, 0.0f, pose.yaw };
 	spawn.object = base;
 	spawn.initializeScripts = false;
@@ -283,12 +283,23 @@ RE::Actor* SpawnGhostNative(const cmp::PlayerPose& pose)
 	const auto handle = data->CreateReferenceAtLocation(spawn);
 	const auto ptr = handle.get();
 	auto* actor = ptr ? ptr->As<RE::Actor>() : nullptr;
-	if (!actor) {
-		REX::WARN("CreateReferenceAtLocation did not yield an Actor");
+	if (!actor || !actor->IsActor()) {
+		REX::WARN("CreateReferenceAtLocation did not yield an Actor (hasPtr={} type={})",
+			ptr ? 1 : 0,
+			ptr ? ptr->GetFormTypeString() : "null");
 		SetGhostNote("CreateReferenceAtLocation failed");
 		return nullptr;
 	}
-	REX::INFO("CreateReferenceAtLocation ok {:08X}", actor->GetFormID());
+	if (actor->GetFormID() == base->GetFormID()) {
+		REX::WARN("CreateReferenceAtLocation formId==base {:08X} type={} baseType={}",
+			actor->GetFormID(),
+			actor->GetFormTypeString(),
+			base->GetFormTypeString());
+	}
+	REX::INFO("CreateReferenceAtLocation ok {:08X} base={:08X} type={}",
+		actor->GetFormID(),
+		base->GetFormID(),
+		actor->GetFormTypeString());
 	FinishGhostSetup(actor, pose, "CreateReferenceAtLocation");
 	return actor;
 }

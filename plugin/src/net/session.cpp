@@ -183,6 +183,8 @@ bool CMP_Join(std::string host, std::uint16_t port, std::uint8_t flags)
 	}
 
 	s.net.joined = true;
+	s.net.joinSentSec = cmp_net::NowSec();
+	s.net.lastHelloRetrySec = s.net.joinSentSec;
 	cmp_net::StartHeartbeat();
 	s.lastStatus = "hello sent, waiting Welcome";
 	CMP_Print("Join IP " + s.settings.host + ":" + std::to_string(s.settings.port)

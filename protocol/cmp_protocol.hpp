@@ -333,6 +333,7 @@ inline bool msg_is_reliable(Msg type)
 	case Msg::SessionRules:
 	case Msg::Bye:
 	case Msg::NackChunk:
+	case Msg::Hit:
 		return true;
 	default:
 		return false;

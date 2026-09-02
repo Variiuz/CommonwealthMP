@@ -147,14 +147,9 @@ SteamFriendsMatch MatchSteamFriends()
 		return out;
 	}
 
-	if (const auto fn = reinterpret_cast<VoidPtrFn>(REX::W32::GetProcAddress(steam, "SteamFriends"))) {
-		if (AssignFriendsMatch(out, fn(), "SteamFriends()")) {
-			return out;
-		}
-	}
-
+	// Prefer versioned interfaces. Bare SteamFriends() is unproven on FO4 and
+	// has crashed GetPersonaName / rich presence probes.
 	const char* flat[] = {
-		"SteamAPI_SteamFriends",
 		"SteamAPI_SteamFriends_v018",
 		"SteamAPI_SteamFriends_v017",
 		"SteamAPI_SteamFriends_v016",
@@ -165,7 +160,8 @@ SteamFriendsMatch MatchSteamFriends()
 		"SteamAPI_SteamFriends_v011",
 		"SteamAPI_SteamFriends_v010",
 		"SteamAPI_SteamFriends_v009",
-		"SteamAPI_SteamFriends_v008"
+		"SteamAPI_SteamFriends_v008",
+		"SteamAPI_SteamFriends"
 	};
 	for (const char* name : flat) {
 		if (const auto fn = reinterpret_cast<VoidPtrFn>(REX::W32::GetProcAddress(steam, name))) {
@@ -204,6 +200,12 @@ SteamFriendsMatch MatchSteamFriends()
 					return out;
 				}
 			}
+		}
+	}
+
+	if (const auto fn = reinterpret_cast<VoidPtrFn>(REX::W32::GetProcAddress(steam, "SteamFriends"))) {
+		if (AssignFriendsMatch(out, fn(), "SteamFriends()")) {
+			return out;
 		}
 	}
 

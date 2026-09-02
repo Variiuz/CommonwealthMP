@@ -46,6 +46,7 @@ std::string TrimCopy(std::string s)
 void SyncJoinFieldsFromSettings()
 {
 	auto& s = CMP_Session();
+	CMP_RefreshPlayerNameFromSteam(false);
 	const std::string addr = s.settings.host + ":" + std::to_string(s.settings.port);
 	std::snprintf(g_joinHost, sizeof(g_joinHost), "%s", addr.c_str());
 	std::snprintf(g_joinPort, sizeof(g_joinPort), "%s", std::to_string(s.settings.port).c_str());
@@ -213,7 +214,14 @@ void ConfirmJoin()
 		return;
 	}
 	CMP_SaveNetworkSettings(host, port);
-	CMP_SavePlayerName(TrimCopy(g_joinName));
+	{
+		const auto typed = TrimCopy(g_joinName);
+		if (typed.empty() || typed == "Player") {
+			CMP_RefreshPlayerNameFromSteam(true);
+			std::snprintf(g_joinName, sizeof(g_joinName), "%s", CMP_Session().settings.playerName.c_str());
+		}
+		CMP_SavePlayerName(TrimCopy(g_joinName));
+	}
 	CMP_SavePassword(TrimCopy(g_joinPassword));
 	auto& s = CMP_Session();
 	if (s.settings.password.size() > 15) {

@@ -79,7 +79,11 @@ void CMP_DrawGhostNameplates(ImDrawList* drawList, float viewportW, float viewpo
 		const float dist = std::sqrt(dx * dx + dy * dy + dz * dz);
 
 		RE::NiPoint3 head = pos;
-		head.z += 180.0f;
+		float headOffset = 128.0f * actor->GetScale();
+		if (auto* npc = actor->GetNPC(); npc && npc->height > 0.1f) {
+			headOffset = npc->height * actor->GetScale();
+		}
+		head.z += headOffset;
 
 		float sx = 0.0f;
 		float sy = 0.0f;

@@ -7,6 +7,7 @@
 #include "combat.h"
 #include "companions.h"
 #include "ghost.h"
+#include "modhash.h"
 #include "presence.h"
 #include "puppet.h"
 #include "udp_win.h"
@@ -112,11 +113,41 @@ void CMP_NetPoll()
 		return;
 	}
 
+	const double now = cmp_net::NowSec();
+	if (s.net.myPeerId == 0 && s.net.joinSentSec > 0.0 && now - s.net.joinSentSec > 1.5
+		&& now - s.net.lastHelloRetrySec > 1.5) {
+		s.net.lastHelloRetrySec = now;
+		const auto world = cmp_net::ReadLocalWorld();
+		if (world.inWorld) {
+			const auto hello = cmp::make_hello(
+				s.settings.playerName,
+				s.settings.playerKey,
+				true,
+				world.location,
+				world.days,
+				world.hour,
+				world.weather,
+				world.x,
+				world.y,
+				world.z,
+				world.interior,
+				s.menu.joinFlags,
+				CMP_ComputeModHash(),
+				s.settings.password);
+			cmp_udp_send(s.settings.host.c_str(), s.settings.port, &hello, static_cast<int>(sizeof(hello)));
+			REX::INFO("Hello retry host={}:{}", s.settings.host, s.settings.port);
+		}
+	}
+	if (s.blobs.pendingInventoryForce && now >= s.blobs.pendingInventoryAt) {
+		s.blobs.pendingInventoryForce = false;
+		CMP_SendInventory(true);
+	}
+
 	const double ttlSec = std::max(1, s.settings.blobAssembleTtlMs) / 1000.0;
 	{
 		std::lock_guard lock(s.mutex);
-		ExpireBlobAssemblies(s.blobs.appearanceParts, cmp_net::NowSec(), ttlSec);
-		ExpireBlobAssemblies(s.blobs.inventoryParts, cmp_net::NowSec(), ttlSec);
+		ExpireBlobAssemblies(s.blobs.appearanceParts, now, ttlSec);
+		ExpireBlobAssemblies(s.blobs.inventoryParts, now, ttlSec);
 	}
 
 	for (int i = 0; i < 16; ++i) {
@@ -200,7 +231,9 @@ void CMP_NetPoll()
 				s.net.isNewPlayer);
 			CMP_Reliable_Send(&snap, static_cast<int>(sizeof(snap)));
 			CMP_SendAppearance(true);
-			CMP_SendInventory(true);
+			// Stagger inventory so join blobs do not share one rate-limit window.
+			s.blobs.pendingInventoryForce = true;
+			s.blobs.pendingInventoryAt = cmp_net::NowSec() + 0.15;
 			continue;
 		}
 

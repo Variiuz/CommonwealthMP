@@ -68,10 +68,29 @@ void ServerRuntime::handle_packet(const char* buf, int n, const sockaddr_in& fro
 		if (sender != clients.end()) sender->second.reliable.on_ack(ack.ackSeq, t);
 		return;
 	}
-	if ((header.flags & cmp::HeaderFlag::Reliable) != 0 && header.seq != 0) {
+	const bool reliable = (header.flags & cmp::HeaderFlag::Reliable) != 0 && header.seq != 0;
+	// Blobs and Hits can soft-fail rate limits: do not ACK / mark until accepted,
+	// otherwise the client stops retrying a packet the server dropped.
+	const bool deferReliableAck = reliable
+		&& (type == cmp::Msg::AppearanceChunk || type == cmp::Msg::InventoryChunk || type == cmp::Msg::Hit);
+	auto ack_reliable = [&](bool mark) {
+		if (!reliable) {
+			return;
+		}
+		if (mark && sender != clients.end()) {
+			sender->second.reliable.mark_handled(header.seq, t);
+		}
 		const auto ack = cmp::make_ack(header.seq, sender == clients.end() ? 0 : sender->second.peerId);
 		send_to(sock, from, &ack, sizeof(ack), "Ack");
-		if (sender != clients.end() && sender->second.reliable.already_handled(header.seq, t)) return;
+	};
+	if (reliable) {
+		if (sender != clients.end() && sender->second.reliable.is_handled(header.seq)) {
+			ack_reliable(false);
+			return;
+		}
+		if (!deferReliableAck) {
+			ack_reliable(true);
+		}
 	}
 	if (type == cmp::Msg::SessionQuery && n >= static_cast<int>(sizeof(cmp::SessionQuery))) {
 		if (!cmp::allow_rate(queryRates, key, t, 4)) { LOG_DEBUG("rate-limit SessionQuery from %s", key.c_str()); return; }
@@ -232,10 +251,16 @@ void ServerRuntime::handle_packet(const char* buf, int n, const sockaddr_in& fro
 	}
 	if ((type == cmp::Msg::AppearanceChunk || type == cmp::Msg::InventoryChunk) && n >= static_cast<int>(sizeof(cmp::BlobChunk))) {
 		cmp::BlobChunk chunk{}; std::memcpy(&chunk, buf, sizeof(chunk)); auto it = clients.find(key); if (it == clients.end()) return; it->second.lastSeen = t;
-		if (!cmp::allow_rate(blobRates, key, t, 20)) { LOG_DEBUG("rate-limit %s from %s", cmp::msg_name(type).data(), key.c_str()); return; }
+		sender = it;
+		if (!cmp::allow_rate(blobRates, key, t, 64)) { LOG_DEBUG("rate-limit %s from %s", cmp::msg_name(type).data(), key.c_str()); return; }
 		std::vector<std::uint8_t> blob;
 		auto& assemblies = type == cmp::Msg::AppearanceChunk ? appearAsm : invAsm;
-		if (!take_blob(assemblies[it->second.peerId], buf, n, blob)) return;
+		if (!take_blob(assemblies[it->second.peerId], buf, n, blob)) {
+			if (deferReliableAck) {
+				ack_reliable(true);
+			}
+			return;
+		}
 		assemblies.erase(it->second.peerId);
 		auto& rec = players[it->second.playerKey]; rec.key = it->second.playerKey;
 		if (type == cmp::Msg::AppearanceChunk) it->second.appearance = rec.appearance = blob;
@@ -243,6 +268,9 @@ void ServerRuntime::handle_packet(const char* buf, int n, const sockaddr_in& fro
 		dirtyPlayers.insert(rec.key);
 		for (auto& [_, other] : clients) if (!same_addr(other.addr, from)) send_blob_reliable(other, type, it->second.peerId, blob);
 		LOG_INFO("%s peer=%u key=%s bytes=%zu", type == cmp::Msg::AppearanceChunk ? "Appearance" : "Inventory", it->second.peerId, it->second.playerKey.c_str(), blob.size());
+		if (deferReliableAck) {
+			ack_reliable(true);
+		}
 		return;
 	}
 	if (type == cmp::Msg::Heartbeat && n >= static_cast<int>(sizeof(cmp::Heartbeat))) { if (auto it = clients.find(key); it != clients.end()) it->second.lastSeen = t; return; }
@@ -283,11 +311,39 @@ void ServerRuntime::handle_packet(const char* buf, int n, const sockaddr_in& fro
 		return;
 	}
 	if (type == cmp::Msg::Hit && n >= static_cast<int>(sizeof(cmp::Hit))) {
-		if (!cfg.pvp) return;
+		if (!cfg.pvp) {
+			if (deferReliableAck) {
+				ack_reliable(true);
+			}
+			return;
+		}
 		cmp::Hit hit{}; std::memcpy(&hit, buf, sizeof(hit)); auto it = clients.find(key); if (it == clients.end()) return; it->second.lastSeen = t;
-		if (!cmp::allow_rate(hitRates, key, t, 12) || hit.attackerPeerId != it->second.peerId || cmp::is_fake_peer(hit.targetPeerId) || hit.targetPeerId == 0 || hit.targetPeerId == hit.attackerPeerId) return;
-		hit.damage = cmp::clamp_hit_damage(hit.damage); if (hit.damage <= 0.0f) return; cmp::fill_header(hit, cmp::Msg::Hit);
-		for (auto& [_, other] : clients) if (other.peerId == hit.targetPeerId) send_to(sock, other.addr, &hit, sizeof(hit), "Hit");
+		sender = it;
+		if (!cmp::allow_rate(hitRates, key, t, 24)) {
+			LOG_DEBUG("rate-limit Hit from %s", key.c_str());
+			return;
+		}
+		if (hit.attackerPeerId != it->second.peerId || cmp::is_fake_peer(hit.targetPeerId) || hit.targetPeerId == 0 || hit.targetPeerId == hit.attackerPeerId) {
+			if (deferReliableAck) {
+				ack_reliable(true);
+			}
+			return;
+		}
+		hit.damage = cmp::clamp_hit_damage(hit.damage); if (hit.damage <= 0.0f) {
+			if (deferReliableAck) {
+				ack_reliable(true);
+			}
+			return;
+		}
+		cmp::fill_header(hit, cmp::Msg::Hit);
+		for (auto& [_, other] : clients) {
+			if (other.peerId == hit.targetPeerId) {
+				send_reliable(other, &hit, sizeof(hit), "Hit");
+			}
+		}
+		if (deferReliableAck) {
+			ack_reliable(true);
+		}
 		return;
 	}
 	LOG_DEBUG("unhandled msg type=%u from %s", static_cast<unsigned>(header.type), key.c_str());

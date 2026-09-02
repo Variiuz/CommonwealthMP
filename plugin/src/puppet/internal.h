@@ -15,13 +15,13 @@ namespace cmp_puppet {
 constexpr float kPi = 3.14159265358979323846f;
 constexpr float kMoveSpeedEps = 5.0f;
 constexpr float kSlowWalkMax = 120.0f;
-constexpr int kMoveStartRefreshTicks = 40;
+constexpr int kStickyRetryTicks = 30;
 
 struct PuppetPrev {
 	std::uint32_t flags{ 0 };
 	bool moving{ false };
 	bool have{ false };
-	int movingTicks{ 0 };
+	int stickyTicks{ 0 };
 	float yaw{ 0.0f };
 };
 

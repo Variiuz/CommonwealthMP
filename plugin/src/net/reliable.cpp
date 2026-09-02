@@ -20,6 +20,8 @@ void SendRaw(const void* data, int len)
 void CMP_Reliable_Reset()
 {
 	g_reliable.clear();
+	auto& s = CMP_Session();
+	g_reliable.set_max_tries(s.settings.reliableRetries);
 }
 
 void CMP_Reliable_Send(const void* data, int len)
@@ -35,6 +37,7 @@ void CMP_Reliable_Send(const void* data, int len)
 		return;
 	}
 	const double now = cmp_net::NowSec();
+	g_reliable.set_max_tries(CMP_Session().settings.reliableRetries);
 	const auto seq = g_reliable.stamp(copy.data(), len);
 	g_reliable.track(seq, copy.data(), len, now);
 	SendRaw(copy.data(), len);

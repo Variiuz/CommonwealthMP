@@ -57,18 +57,21 @@ void FreezeGhost(RE::Actor* actor, std::uint32_t peerId)
 	}
 
 	// Do not set kMovementBlocked: it freezes locomotion while we SetPosition the root.
+	// Do not set kAttackingDisabled: it blocks weaponDraw / jump graph edges on puppets.
 	actor->boolFlags.set(
 		RE::Actor::BOOL_FLAGS::kCastingDisabled,
 		RE::Actor::BOOL_FLAGS::kDoNotShowOnStealthMeter,
-		RE::Actor::BOOL_FLAGS::kShouldAnimGraphUpdate,
-		RE::Actor::BOOL_FLAGS::kAttackingDisabled);
+		RE::Actor::BOOL_FLAGS::kShouldAnimGraphUpdate);
 	actor->boolFlags.reset(RE::Actor::BOOL_FLAGS::kAttackOnSight);
 	actor->boolFlags.reset(RE::Actor::BOOL_FLAGS::kMovementBlocked);
+	actor->boolFlags.reset(RE::Actor::BOOL_FLAGS::kAttackingDisabled);
 
 	int& tick = g_freezeTicks[peerId];
 	++tick;
 	actor->StopCombat();
-	if (tick == 1 || (tick % 30) == 0) {
+	// EnableAI(false) once on first freeze / respawn only. Re-calling it every
+	// ~30 ticks snaps locomotion back to standing idle.
+	if (tick == 1) {
 		actor->SetLifeState(RE::ACTOR_LIFE_STATE::kAlive);
 		CMP_CallActorPapyrus(actor, "EnableAI", false);
 	}
@@ -114,6 +117,7 @@ void CMP_ReapplyGhostPuppet(std::uint32_t peerId)
 		}
 	}
 	if (actor) {
+		CMP_ResetGhostPuppet(peerId);
 		CMP_ApplyGhostPuppet(actor, pose);
 	}
 }

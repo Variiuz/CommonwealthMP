@@ -156,6 +156,7 @@ int test_protocol()
 	CHECK(cmp::msg_name(cmp::Msg::Ack) == "Ack");
 	CHECK(cmp::msg_name(cmp::Msg::NackChunk) == "NackChunk");
 	CHECK(cmp::msg_is_reliable(cmp::Msg::Chat));
+	CHECK(cmp::msg_is_reliable(cmp::Msg::Hit));
 	CHECK(!cmp::msg_is_reliable(cmp::Msg::PlayerPose));
 	CHECK(cmp::clamp_hit_damage(-3.0f) == 0.0f);
 	CHECK(cmp::clamp_hit_damage(0.0f) == 0.0f);

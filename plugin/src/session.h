@@ -62,6 +62,8 @@ struct NetRuntime {
 	double lastSendPoseSec{ 0.0 };
 	double lastRecvPoseSec{ 0.0 };
 	float measuredRttMs{ 0.0f };
+	double joinSentSec{ 0.0 };
+	double lastHelloRetrySec{ 0.0 };
 };
 
 struct GhostRuntime {
@@ -81,6 +83,8 @@ struct BlobRuntime {
 	std::uint64_t lastInvKey{ 0 };
 	double lastAppearanceSend{ 0.0 };
 	double lastInventorySend{ 0.0 };
+	bool pendingInventoryForce{ false };
+	double pendingInventoryAt{ 0.0 };
 };
 
 struct OverlayRuntime {
