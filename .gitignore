@@ -18,9 +18,26 @@ mod/CommonwealthMP/fomod/
 *.suo
 *.log
 Thumbs.db
+tools/cmp-reporter/target/
+tools/cmp-reporter/dist/
 data/seed/*.fos
 data/dumps/*.txt
 *.dmp
 dist/server/session/
 CK_Test.esp
 **/__pycache__/
+plugin/gens/
+plugin/*.obj
+*.obj
+
+tools/cmp-reporter/target/
+tools/cmp-reporter/dist/
+
+
+.cursor/
+.github/instructions/
+docs/
+
+# Scaleform Flex toolchain (downloaded by setup.bat / setup.sh)
+interface/swf/_tools/
+interface/swf/node_modules/
