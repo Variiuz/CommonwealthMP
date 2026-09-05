@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.7.1](https://github.com/Variiuz/CommonwealthMP/compare/v0.7.0...v0.7.1) (2026-09-05)
+
+
+### Features
+
+* 0.7.0 TCP+UDP async server, drop fakes ([8db0b91](https://github.com/Variiuz/CommonwealthMP/commit/8db0b91a61eb5aa034ea55bcb1519668838e0616))
+* add dedicated UDP server, probe, and CTest ([09654dd](https://github.com/Variiuz/CommonwealthMP/commit/09654dd1d87108ca7b304cbb9e48b8e3293d299e))
+* add F4SE plugin for Steam 1.11.240 ([ba5d052](https://github.com/Variiuz/CommonwealthMP/commit/ba5d0523d4f0eb4abb0b8e9d847f255bf0e575b2))
+* add MO2 pack data and scripts ([899bd2f](https://github.com/Variiuz/CommonwealthMP/commit/899bd2f23fa3ebd097958e4137bc1686aa23c2ba))
+* add protocol 6 headers ([354155f](https://github.com/Variiuz/CommonwealthMP/commit/354155f2ccbeae2840ee032c8ac3072e1066850e))
+* **interface:** add Scaleform companion menu ([1a6673c](https://github.com/Variiuz/CommonwealthMP/commit/1a6673c0f422f2d69916276488a8247836078174))
+* **plugin:** modularize client and ship HUD/menu/presence ([a8f4d72](https://github.com/Variiuz/CommonwealthMP/commit/a8f4d72532e67889dc738787cce1d62d409c1558))
+* **plugin:** swap Discord RPC for Game SDK ([11abb3d](https://github.com/Variiuz/CommonwealthMP/commit/11abb3d41c96aa63fca31f43c093e5454b7f98ad))
+* **plugin:** wire Discord Game SDK presence ([2c68814](https://github.com/Variiuz/CommonwealthMP/commit/2c688141c5021bf4a16218af4ab6739dc6a84219))
+* **protocol:** add reliable channel for protocol 11 ([cf0a11c](https://github.com/Variiuz/CommonwealthMP/commit/cf0a11c3cca0fb743d0f54d25fb26a621b93ff92))
+* **server:** split modules, console, and session policy ([1653b61](https://github.com/Variiuz/CommonwealthMP/commit/1653b613094c74dcb1c3a4e72913c69261aa0ee2))
+* **tools:** add cmp-reporter crash bundle app ([c34dc07](https://github.com/Variiuz/CommonwealthMP/commit/c34dc07f4882929c9685f80964ce6bafe50d2a13))
+
+
+### Bug Fixes
+
+* **plugin:** harden ghost sync for 0.6.8 ([4106562](https://github.com/Variiuz/CommonwealthMP/commit/4106562fc4f7fab700df9eb6e958fea2c2a3f1f9))
+
 ## 0.6.8
 
 Ghost sync and join reliability: less teleport/idle snap, working puppet anims and draw, better faces, PvP hits, nametags, Steam names, and server rate limits.
