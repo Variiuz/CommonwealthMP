@@ -35,7 +35,8 @@ tools/cmp-reporter/target/
 tools/cmp-reporter/dist/
 
 
-.cursor/
+.cursor/*
+!.cursor/environment.json
 .github/instructions/
 docs/
 

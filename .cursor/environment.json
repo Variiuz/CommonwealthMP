@@ -1,0 +1,4 @@
+{
+  "name": "CommonwealthMP",
+  "install": "cmake -B build/server -S . -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++ && cmake --build build/server --parallel"
+}
