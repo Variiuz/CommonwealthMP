@@ -25,10 +25,9 @@ Ingame Images (WIP)
 
 <img width="512" height="300" alt="Ingame Footage of a Monster" src="https://github.com/user-attachments/assets/1c44f3f9-9f26-4796-8ac6-766be718e08e" />
 
-Console (conhost wrapped vs standalone window )
+Console (conhost wrapped vs standalone window (image follows later) )
 
 <img width="512" height="300" alt="conhost wrapped" src="https://github.com/user-attachments/assets/a6227b0a-1857-4940-8967-385991cea12a" />
-<img width="512" height="300" alt="custom console window" src="https://github.com/user-attachments/assets/b44f9350-51c6-4509-91fe-459d41aada01" />
 
 
 
