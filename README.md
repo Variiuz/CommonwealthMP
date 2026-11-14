@@ -1,35 +1,35 @@
-# CommonwealthMP
 
-CommonwealthMP (short CMP) is a multiplayer mod for Fallout 4. It is early development and not yet reliably playable: open-source, free, not feature-complete. Focus is the dedicated server and F4SE plugin.
+<img width="1920" height="720" alt="cmp-banner-transparent" src="https://github.com/user-attachments/assets/2d31d5bb-e684-4758-a808-17f9bd2cb015" />
 
+
+---
 > **Heads up** I am currently fully reworking CMP, leaning more into a server-sided approach instead relying on client games todo the work. I am already further than this version.
 > So keep in mind what you see here is mostly research worth and not up to my standards. I will keep this updated as soon as I have a stable-ish version. Thank you :)
 
-## Current State
+ 
+# What is CMP?
+CommonwealthMP (short CMP) is a multiplayer mod for Fallout 4. It is early development but growing stable by the day.
+My main goal is to deliver a fun and stable expanded Fallout 4 CO-OP experience without any downsides.
 
+## What does expanded mean?
+Adding features any co-op game would need, like:
+- Reviving downed teammates
+- Teleporting to players
+- Chat
+- Emotes
+- Shared loot, instanced loot containers, shared Quests and rewards
+- In-Sync NPCs
+- Smooth Movements
+- Settlement Building together
+
+And much more! 
+
+
+## Current State
+> This applies only to the Legacy code in this repo, not any new code!
 
 Currently it is "playable" but on a simple basis: 2+ players can join a host world and see each other.
 Guests join by IP; they do not share a save; this means progress SHOULD only happen on the host. The plugin is not yet stable; crashes are expected. The server is a separate process and does not require Fallout 4. The UI is bad, I am not really familiar with swfs etc but i try my best. Main goal is animations, inventory, appareance, world sync.
-
-
-## Playability
-
-I would not call it "playable" yet. It is a work-in-progress, and the plugin is not stable. Expect crashes, desyncs, and other rather weird issues :D
-You can run around with friends, but do not expect to be able to reliably play :)
-
-Animations and world sync are not yet done but partially in, Priority is getting Locomotion, inplace, anims to work. Inventory / DrawWeapons & Player Identity is the next prio.
-
-Below are a few images, more to come!
-
-
-Ingame Images (WIP)
-
-<img width="512" height="300" alt="Ingame Footage of a Monster" src="https://github.com/user-attachments/assets/1c44f3f9-9f26-4796-8ac6-766be718e08e" />
-
-Console (conhost wrapped vs standalone window (image follows later) )
-
-<img width="512" height="300" alt="conhost wrapped" src="https://github.com/user-attachments/assets/a6227b0a-1857-4940-8967-385991cea12a" />
-
 
 
 
