@@ -2,7 +2,8 @@
 
 CommonwealthMP (short CMP) is a multiplayer mod for Fallout 4. It is early development and not yet reliably playable: open-source, free, not feature-complete. Focus is the dedicated server and F4SE plugin.
 
-> **Warning:** This is a work-in-progress. Code may not compile or run, games can crash randomly, and save files may be corrupted. Use at your own risk.
+> **Heads up** I am currently fully reworking CMP, leaning more into a server-sided approach instead relying on client games todo the work. I am already further than this version.
+> So keep in mind what you see here is mostly research worth and not up to my standards. I will keep this updated as soon as I have a stable-ish version. Thank you :)
 
 ## Current State
 
@@ -105,8 +106,7 @@ Packaged in is the discord social sdk or whatever they named their 50th sdk afte
 
 
 ## Disclaimer
-Work gets done much faster with AI & Agent assisted development, while some parts may contain ai generated code, I try my best to check at minimum the written code and at best write tests for them. Releases generally have human reviewed code 99%
-So yes, for people who really hate AI, you do not have to stay here and read or use this mod.
+I use AI to get work done faster and research more effective. 
 
 ## License
 
