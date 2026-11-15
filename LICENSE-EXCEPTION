@@ -1,0 +1,35 @@
+CMP (Commonwealth Multiplayer)
+Copyright (C) 2026 Variiuz
+
+Additional permission under GNU AGPL version 3 section 7
+
+This file adds an additional permission to the GNU Affero General Public
+License version 3 that covers CMP (the text is in the LICENSE file). It does
+not change the LICENSE file.
+
+If you modify this Program, or any covered work, by linking or combining it
+with any of the following (or a modified version of them):
+
+  a) Fallout 4, its Creation Engine runtime, and its official add-ons, as
+     published by Bethesda Softworks or its affiliates, including the game's
+     executable and libraries;
+  b) the Fallout 4 Script Extender (F4SE) runtime, its plugin interface and
+     the headers of its official SDK;
+  c) the Steam client and the Steamworks API library (steam_api64.dll) that
+     ships with the game, as published by Valve Corporation;
+
+(together, the "Non-Free Platform Components"), the licensors of this Program
+grant you additional permission to convey the resulting work. Corresponding
+Source for a non-source form of such a combination shall not include the
+source code for the parts of the Non-Free Platform Components used, and you
+are not required to convey the Non-Free Platform Components themselves.
+
+This permission does not allow you to distribute any Non-Free Platform
+Component; their own licenses and terms govern that. All parts of the
+combined work other than the Non-Free Platform Components remain under the
+GNU Affero General Public License version 3, including its section 13
+(remote network interaction).
+
+When you convey a modified version of this Program, you may extend this
+additional permission to your version, but you are not obliged to do so. If
+you do not wish to do so, delete this file from your version.
